@@ -4,6 +4,7 @@ extern crate portal_lib as portal;
 use mio::Registry;
 use crate::Endpoint;
 use mio::event::Event;
+use mio::Interest;
 use anyhow::Result;
 use std::os::unix::io::AsRawFd;
 
@@ -34,12 +35,21 @@ pub fn handle_client_event (
             read = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 2048, libc::SPLICE_F_NONBLOCK);    
         }
 
+
         // check if connection is closed
         if read < 0 {
             return Ok(true);
         }
 
+        // if we drained the pipe, deregister the stream
+        // will be interested again when something is written
+        if read == 0 {
+            registry.deregister(&mut endpoint.stream)?;
+        }
+
         println!("read {} bytes from pipe", read);
+
+
         
     }
 
@@ -60,10 +70,20 @@ pub fn handle_client_event (
 
         let sent;
         unsafe {
-            sent = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 2048, libc::SPLICE_F_NONBLOCK);    
+            sent = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 2048, libc::SPLICE_F_NONBLOCK);  
+
+        }
+
+        // check if connection is closed
+        if sent <= 0 {
+            return Ok(true);
         }
 
         println!("wrote {} bytes to pipe", sent);
+
+
+        // We are now interested in WRITEABLE events for our peer
+        //registry.register(&mut peer.stream, *endpoint.peer_token.as_ref().unwrap(),Interest::WRITABLE)?;
 
         //libc::syscall(libc::SYS_copy_file_range, fd_in, off_in, fd_out, off_out, len, flags)
 

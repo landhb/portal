@@ -3,6 +3,8 @@
 extern crate portal_lib as portal;
 use std::collections::HashMap;
 use std::error::Error;
+use std::cell::{RefCell};
+use std::rc::Rc;
 
 // use another way to generate the ID
 // ideally more human readable/shareable
@@ -28,8 +30,10 @@ pub struct Endpoint {
     stream: TcpStream,
     peer_writer: Option<PipeWriter>,
     peer_reader: Option<PipeReader>,
-
+    peer_token: Option<Token>,
+    //is_ready: bool,
 }
+
 
 // increment the polling token by one
 // for each new client connection
@@ -58,9 +62,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut unique_token = Token(SERVER.0+1);
 
-    let mut endpoints: HashMap<Token, Endpoint> = HashMap::new();
+    // Use to reference existing endpoints and their polling tokens
+    let endpoints: Rc<RefCell<HashMap<Token, Endpoint>>> = Rc::new(RefCell::new(HashMap::new()));
+    let mut lookup_token: HashMap<String, Token> = HashMap::new();
     
-
     // Start an event loop.
     loop {
 
@@ -113,35 +118,37 @@ fn main() -> Result<(), Box<dyn Error>> {
                             let (reader, writer) = pipe().unwrap();
 
                             // lookup reciever's ID
-                            let mut peer = None;
-                            for (_token, mut client) in endpoints.iter_mut() {
+                            let peer_token = match lookup_token.get(req.id.as_ref().unwrap()) {
+                                Some(p) => p,
+                                None => {continue;},
+                            };
 
-                                if client.id == req.id {
 
-                                    // send the public key to the sender
-                                    match portal::portal_send_response(&mut connection, client.id.as_ref().unwrap().clone(), Some(client.pubkey.as_ref().unwrap().clone())) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            println!("error while sending resp {:?}", e);
-                                            continue;
-                                        }
-                                    }
+                            let mut ref_endpoints = endpoints.borrow_mut();
+                            
+                            let mut peer = match ref_endpoints.get_mut(&peer_token) {
+                                Some(p) => p,
+                                None => {
+                                    lookup_token.remove(req.id.as_ref().unwrap());
+                                    continue;
+                                },
+                            };
 
-                                    // update the peer with the pipe information
-                                    client.peer_writer = None;
-                                    client.peer_reader = Some(reader);
-
-                                    
-                                    peer = Some(client);
-                                    break;
+                            // send the peer's public key to the sender
+                            match portal::portal_send_response(&mut connection, 
+                                                peer.id.as_ref().unwrap().clone(), 
+                                                Some(peer.pubkey.as_ref().unwrap().clone())) {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    println!("error while sending resp {:?}", e);
+                                    continue;
                                 }
                             }
 
-                            if peer.is_none() {
-                                continue;
-                            }
+                            // update the peer with the pipe information
+                            peer.peer_writer = None;
+                            peer.peer_reader = Some(reader);
 
-                            
 
                             // set socket to READABLE-interest only, after we confirm the existence
                             // of the receiver, this client will only be sending
@@ -153,15 +160,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                             let endpoint = Endpoint {
                                 id: req.id,
                                 dir: req.direction,
-                                pubkey: peer.unwrap().pubkey.clone(),
+                                pubkey: peer.pubkey.clone(),
                                 stream: connection,
                                 peer_reader: None,
                                 peer_writer: Some(writer),
+                                peer_token: Some(*peer_token),
+                                
                             };
 
                             println!("Added sender {:?}", endpoints);
 
-                            endpoints.entry(token).or_insert(endpoint);
+                            ref_endpoints.entry(token).or_insert(endpoint);
 
                         }
                         portal::Direction::Reciever => {
@@ -182,41 +191,68 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     continue;
                                 }
                             }
-                      
-
-                            // set socket to WRITEABLE-interest only, this is the reciever
-                            poll.registry().register(&mut connection, token,Interest::WRITABLE)?;
 
                             
                             let endpoint = Endpoint {
-                                id: Some(uuid),
+                                id: Some(uuid.clone()),
                                 dir: req.direction,
                                 pubkey: key_field,
                                 stream: connection,
                                 peer_writer: None,
                                 peer_reader: None,
+                                peer_token: None,
                             };
 
                             println!("{:?}", endpoint);
-                            endpoints.entry(token).or_insert(endpoint);
+                            endpoints.borrow_mut().entry(token).or_insert(endpoint);
+                            lookup_token.entry(uuid).or_insert(token);
                         }
                     }
                 }
                 token => {
+                    println!("event {:?} on token {:?}", event, token);
 
-                    let done = if let Some(client) = endpoints.get_mut(&token) {
-                        println!("calling handler for {:?}", client);
-                        handlers::handle_client_event(poll.registry(), client, event)?
-                    } else {
-                        // Sporadic events happen, we can safely ignore them.
-                        false
+                    let mut ref_endpoints = endpoints.borrow_mut();
+
+                    // get the client that will be performing the read/write
+                    let client = match ref_endpoints.get_mut(&token) {
+                        Some(p) => p,
+                        None => {
+                            continue;
+                        },
                     };
+
+
+                    // perform the action
+                    let done = handlers::handle_client_event(poll.registry(), client, event)?;
+
+                    // if we read in new data
+                    // we are now interested in WRITEABLE events for our peer 
+                    if event.is_readable() {
+
+                        let token_val = client.peer_token.as_ref().unwrap().0;
+
+                        // get the corresponding peer
+                        let peer = match ref_endpoints.get_mut(&Token(token_val)) {
+                            Some(p) => p,
+                            None => {
+                                continue;
+                            },
+                        };
+
+                        match poll.registry().register(&mut peer.stream, Token(token_val),Interest::WRITABLE) {
+                            Ok(_) => {},
+                            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                                poll.registry().reregister(&mut peer.stream, Token(token_val),Interest::WRITABLE)?;
+                            },
+                            Err(e) => {panic!("{:?}",e);},
+                        }
+                    }
 
                     println!("finished handler, got {}", done);
                     if done {
                         println!("Removing endpoint for {:?}", token);
-
-                        endpoints.remove(&token);
+                        ref_endpoints.remove(&token);
                     }
                 }
             }

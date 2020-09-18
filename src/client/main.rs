@@ -9,12 +9,12 @@ use anyhow::Result;
 const CLIENT: Token = Token(0);
 
 
-fn handle_read(mut conn: &mut TcpStream) -> Result<usize> { //, _event: &Event
+fn handle_read(mut conn: &mut TcpStream, _event: &Event) -> Result<usize> { //, _event: &Event
     let mut received_data = Vec::with_capacity(4096);
     portal::portal_recv_data(&mut conn, &mut received_data)
 }
 
-fn handle_write(mut conn: &mut TcpStream) -> Result<()> { // , _event: &Event
+fn handle_write(mut conn: &mut TcpStream, _event: &Event) -> Result<()> { // , _event: &Event
     let data = *b"Hello, World!";
     portal::portal_send_data(&mut conn,data.to_vec())
 }
@@ -123,7 +123,7 @@ fn transfer(req: portal::Request, addr: std::net::SocketAddr, is_reciever: bool)
     poll.registry().register(&mut client, CLIENT,interest_opts)?;
 
     
-    /* main transfer loop
+    // main transfer loop
     loop {
 
         // Poll Mio for events, blocking until we get an event.
@@ -149,25 +149,7 @@ fn transfer(req: portal::Request, addr: std::net::SocketAddr, is_reciever: bool)
 
 
 
-    } */
-
-    // TEST LOOP TO FIND BUG, DELETE LATER
-    loop {
-        if is_reciever {
-            let read = handle_read(&mut client)?;
-
-            if read == 0 {
-                continue;
-            }
-
-            println!("{:?}", read);
-        } else {
-            handle_write(&mut client)?;
-            break;
-        }
-    }
-
-    Ok(())
+    } 
 
 }
 
