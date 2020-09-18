@@ -38,10 +38,9 @@ fn interrupted(err: &io::Error) -> bool {
 
 
 
-fn recv_generic(connection: &mut TcpStream) -> Result<Vec<u8>> {
+fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> Result<usize> {
     //let mut connection_closed = false;
-    let mut received_data = Vec::with_capacity(4096);
-    // We can (maybe) read from the connection.
+    //let mut received_data = Vec::with_capacity(4096);
     loop {
         let mut buf = [0; 256];
         match connection.read(&mut buf) {
@@ -61,7 +60,7 @@ fn recv_generic(connection: &mut TcpStream) -> Result<Vec<u8>> {
         }
     }
 
-    Ok(received_data)
+    Ok(received_data.len())
 }
 
 fn send_generic(connection: &mut TcpStream, data: Vec<u8>) -> Result<()> {
@@ -91,7 +90,8 @@ fn send_generic(connection: &mut TcpStream, data: Vec<u8>) -> Result<()> {
 
 pub fn portal_get_request(mut connection: &mut TcpStream) -> Result<Request> { 
 
-    let received_data = recv_generic(&mut connection)?;
+    let mut received_data = Vec::with_capacity(4096);
+    recv_generic(&mut connection,&mut received_data)?;
 
     let req: Request = bincode::deserialize(&received_data)?;
 
@@ -101,7 +101,9 @@ pub fn portal_get_request(mut connection: &mut TcpStream) -> Result<Request> {
 
 pub fn portal_get_response(mut connection: &mut TcpStream) -> Result<Option<Response>> { 
 
-    let received_data = recv_generic(&mut connection)?;
+    
+    let mut received_data = Vec::with_capacity(4096);
+    recv_generic(&mut connection,&mut received_data)?;
 
     if received_data.len() == 0 {
         return Ok(None);
@@ -130,6 +132,23 @@ pub fn portal_send_request(connection: &mut TcpStream, request: Request) -> Resu
 }
 
 
+
+pub fn portal_send_data(connection: &mut TcpStream, data: Vec<u8>) -> Result<()> {
+
+    // do encryption here
+
+    return send_generic(connection,data);
+}
+
+pub fn portal_recv_data(mut connection: &mut TcpStream, mut data: &mut Vec<u8>) -> Result<usize> {
+    //let received_data = recv_generic(&mut connection)?;
+
+
+    //let mut received_data = Vec::with_capacity(4096);
+    recv_generic(&mut connection,&mut data)?;
+    // do decryption here
+    Ok(data.len())    
+}
 
 #[cfg(test)]
 mod tests {

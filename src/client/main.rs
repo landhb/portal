@@ -5,16 +5,18 @@ use mio::{Events, Interest, Poll, Token};
 use mio::event::Event;
 use std::error::Error;
 use clap::{Arg, App, SubCommand,AppSettings};
-
+use anyhow::Result;
 const CLIENT: Token = Token(0);
 
 
-fn handle_read(event: &Event) {
-
+fn handle_read(mut conn: &mut TcpStream) -> Result<usize> { //, _event: &Event
+    let mut received_data = Vec::with_capacity(4096);
+    portal::portal_recv_data(&mut conn, &mut received_data)
 }
 
-fn handle_write(event: &Event) {
-
+fn handle_write(mut conn: &mut TcpStream) -> Result<()> { // , _event: &Event
+    let data = *b"Hello, World!";
+    portal::portal_send_data(&mut conn,data.to_vec())
 }
 
 
@@ -60,7 +62,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 pubkey: None,
             };
 
-            transfer(req,addr)?;
+            transfer(req,addr, false)?;
             
         },
         ("recv", Some(_args)) =>  { 
@@ -71,7 +73,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 pubkey: Some(String::from("Test")),
             };
 
-            transfer(req,addr)?;
+            transfer(req,addr, true)?;
 
         },
         _ => {println!("Please provide a valid subcommand. Run portal -h for more information.");},
@@ -80,7 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn transfer(req: portal::Request, addr: std::net::SocketAddr) -> Result<(), Box<dyn Error>>  {
+fn transfer(req: portal::Request, addr: std::net::SocketAddr, is_reciever: bool) -> Result<(), Box<dyn Error>>  {
 
     // Create a poll instance.
     let mut poll = Poll::new()?;
@@ -96,43 +98,76 @@ fn transfer(req: portal::Request, addr: std::net::SocketAddr) -> Result<(), Box<
     portal::portal_send_request(&mut client, req)?;
 
 
-    // Wait until we get our transfer ID
+    // Wait until we get our transfer ID or the peer's public key
+    let pubkey;
+    let mut interest_opts = Interest::READABLE;
     while let Ok(resp) = portal::portal_get_response(&mut client) {
 
         if resp == None {
             continue;
         }
 
-        println!("[+] Your transfer ID is: {:?}", resp.unwrap().id);
+        if is_reciever {
+            println!("[+] Your transfer ID is: {:?}", resp.unwrap().id);
+            interest_opts = Interest::READABLE;
+            break;
+        }
 
+        pubkey = resp.unwrap().pubkey;
+        interest_opts = Interest::WRITABLE;
+        println!("[+] Received client public key: {:?}", pubkey);
         break;
     }
 
 
-    poll.registry().register(&mut client, CLIENT ,Interest::READABLE | Interest::WRITABLE)?;
+    poll.registry().register(&mut client, CLIENT,interest_opts)?;
 
     
-    // main transfer loop
+    /* main transfer loop
     loop {
 
         // Poll Mio for events, blocking until we get an event.
         poll.poll(&mut events, None)?;
 
+        println!("poll returned");
+
         // Process each event.
         for event in events.iter() {
+
+            println!("got event {:?}", event);
            
             if event.is_writable() {
-                handle_write(&event);                
+                handle_write(&mut client, &event)?;               
             }
 
             if event.is_readable() {
-                handle_read(&event);
+                let read = handle_read(&mut client, &event)?;
+                println!("finished read {:?}", read); 
             }
 
         }
 
+
+
+    } */
+
+    // TEST LOOP TO FIND BUG, DELETE LATER
+    loop {
+        if is_reciever {
+            let read = handle_read(&mut client)?;
+
+            if read == 0 {
+                continue;
+            }
+
+            println!("{:?}", read);
+        } else {
+            handle_write(&mut client)?;
+            break;
+        }
     }
 
+    Ok(())
 
 }
 

@@ -15,9 +15,31 @@ pub fn handle_client_event (
 
     if event.is_writable() {
         // We can (likely) write to the socket without blocking.
+        println!("reading for {:?}", endpoint);
+        let reader = match &endpoint.peer_reader {
+            Some(p) => p,
+            None => {
+                // end this connection if there is no peer pipe
+                //registry.deregister(&mut endpoint.stream)?;
+                return Ok(false);
+            }
+        };
 
-        
 
+        let dst_fd = endpoint.stream.as_raw_fd();
+        let src_fd = reader.as_raw_fd();
+
+        let read;
+        unsafe {
+            read = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 2048, libc::SPLICE_F_NONBLOCK);    
+        }
+
+        // check if connection is closed
+        if read < 0 {
+            return Ok(true);
+        }
+
+        println!("read {} bytes from pipe", read);
         
     }
 
@@ -28,6 +50,7 @@ pub fn handle_client_event (
             Some(p) => p,
             None => {
                 // end this connection if there is no peer pipe
+                registry.deregister(&mut endpoint.stream)?;
                 return Ok(true);
             }
         };
@@ -37,7 +60,7 @@ pub fn handle_client_event (
 
         let sent;
         unsafe {
-            sent = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 2048, 0);    
+            sent = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 2048, libc::SPLICE_F_NONBLOCK);    
         }
 
         println!("wrote {} bytes to pipe", sent);

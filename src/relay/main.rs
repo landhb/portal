@@ -98,7 +98,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     let token = next(&mut unique_token);
 
-                    println!("{:?}", req);
+                    println!("token: {:?}, {:?}", token,req);
 
                     match req.direction {
 
@@ -115,9 +115,23 @@ fn main() -> Result<(), Box<dyn Error>> {
                             // lookup reciever's ID
                             let mut peer = None;
                             for (_token, mut client) in endpoints.iter_mut() {
+
                                 if client.id == req.id {
+
+                                    // send the public key to the sender
+                                    match portal::portal_send_response(&mut connection, client.id.as_ref().unwrap().clone(), Some(client.pubkey.as_ref().unwrap().clone())) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            println!("error while sending resp {:?}", e);
+                                            continue;
+                                        }
+                                    }
+
+                                    // update the peer with the pipe information
                                     client.peer_writer = None;
                                     client.peer_reader = Some(reader);
+
+                                    
                                     peer = Some(client);
                                     break;
                                 }
@@ -126,6 +140,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                             if peer.is_none() {
                                 continue;
                             }
+
+                            
 
                             // set socket to READABLE-interest only, after we confirm the existence
                             // of the receiver, this client will only be sending
@@ -195,8 +211,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // Sporadic events happen, we can safely ignore them.
                         false
                     };
+
+                    println!("finished handler, got {}", done);
                     if done {
                         println!("Removing endpoint for {:?}", token);
+
                         endpoints.remove(&token);
                     }
                 }
