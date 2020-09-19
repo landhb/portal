@@ -13,7 +13,6 @@ use uuid::Uuid;
 //use std::sync::Mutex;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
-//use std::os::unix::io::{RawFd,AsRawFd};
 use os_pipe::{pipe,PipeReader,PipeWriter};
 
 mod handlers;
@@ -31,7 +30,6 @@ pub struct Endpoint {
     peer_writer: Option<PipeWriter>,
     peer_reader: Option<PipeReader>,
     peer_token: Option<Token>,
-    //is_ready: bool,
 }
 
 
@@ -101,9 +99,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // add the connection to the endpoint registry
                     let req = portal::portal_get_request(&mut connection)?;
 
-                    let token = next(&mut unique_token);
-
-                    println!("token: {:?}, {:?}", token,req);
+                    println!("req: {:?}", req);
 
                     match req.direction {
 
@@ -144,6 +140,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     continue;
                                 }
                             }
+
+                            // assign token since the peer is valid
+                            let token = next(&mut unique_token);
 
                             // update the peer with the pipe information
                             peer.peer_writer = None;
@@ -204,6 +203,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             };
 
                             println!("{:?}", endpoint);
+                            let token = next(&mut unique_token);
                             endpoints.borrow_mut().entry(token).or_insert(endpoint);
                             lookup_token.entry(uuid).or_insert(token);
                         }
