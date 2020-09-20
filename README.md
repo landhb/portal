@@ -7,8 +7,8 @@ Magically transport your files.
 
 ```
 lib/        # implementation of the protocol
-src/relay   # relay server source
-src/client  # client source
+relay/      # relay server source
+client/     # client source
 ```
 
 ### Run with:
