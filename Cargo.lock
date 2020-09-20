@@ -159,12 +159,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "lazy_static",
- "libc",
  "mio",
- "os_pipe",
  "portal-lib",
- "uuid",
 ]
 
 [[package]]
@@ -176,6 +172,19 @@ dependencies = [
  "mio",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "portal-relay"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "lazy_static",
+ "libc",
+ "mio",
+ "os_pipe",
+ "portal-lib",
+ "uuid",
 ]
 
 [[package]]
