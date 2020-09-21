@@ -9,6 +9,7 @@ use anyhow::Result;
 const CLIENT: Token = Token(0);
 
 
+
 fn handle_read(mut conn: &mut TcpStream, _event: &Event) -> Result<usize> { //, _event: &Event
     let mut received_data = Vec::with_capacity(4096);
     portal::portal_recv_data(&mut conn, &mut received_data)
@@ -22,9 +23,9 @@ fn handle_write(mut conn: &mut TcpStream, _event: &Event) -> Result<()> { // , _
 
 fn main() -> Result<(), Box<dyn Error>> {
 
-    let matches = App::new("portal")
-                  .version("1.0")
-                  .author("Bradley Landherr")
+    let matches = App::new(env!("CARGO_PKG_NAME"))
+                  .version(env!("CARGO_PKG_VERSION"))
+                  .author(env!("CARGO_PKG_AUTHORS"))
                   .about("Quick File Transfers")
                   .setting(AppSettings::ArgRequiredElseHelp)
                   .subcommand(SubCommand::with_name("send")

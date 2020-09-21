@@ -56,7 +56,7 @@ fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> Resu
             Err(ref err) if would_block(err) => break,
             Err(ref err) if interrupted(err) => continue,
             // Other errors we'll consider fatal.
-            Err(err) => return Err(anyhow::Error::new(err)),
+            Err(err) => return Err(err.into()),
         }
     }
 
@@ -76,15 +76,15 @@ fn send_generic(connection: &mut TcpStream, data: Vec<u8>) -> Result<()> {
         // Would block "errors" are the OS's way of saying that the
         // connection is not actually ready to perform this I/O operation.
         Err(ref err) if would_block(err) => {
-            return Err(Error::new(PortalError::WouldBlock))
+            return Err(PortalError::WouldBlock.into())
         }
         // Got interrupted (how rude!), we'll try again.
         Err(ref err) if interrupted(err) => {
             //return handle_connection_event(registry, connection, event)
-            return Err(Error::new(PortalError::Interrupted))
+            return Err(PortalError::Interrupted.into())
         }
         // Other errors we'll consider fatal.
-        Err(err) => return Err(Error::new(err)),
+        Err(err) => return Err(err.into()),
     }
 }
 

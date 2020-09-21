@@ -6,15 +6,32 @@ use mio::event::Event;
 use anyhow::Result;
 use std::os::unix::io::AsRawFd;
 
+/**
+ *  Handles events without utilizing a userpace intermediary buffer
+ *  Utilizing splice(2)
+ *
+ *  READABLE: Transfer data from Sender socket -> pipe
+ *  WRITEABLE: Transfer data from pipe -> Reciever socket
+ *
+ *  The data will be transfered from:
+ *   
+ *  Sender socket -> Pipe -> Reciever Socket
+ */
 pub fn handle_client_event (
     registry: &Registry,
     endpoint: &mut Endpoint,
     event: &Event) -> Result<bool> {
 
 
+    // Check for closed connections first
+    if event.is_error() || event.is_read_closed() || event.is_write_closed() {
+        registry.deregister(&mut endpoint.stream)?;
+        return Ok(true);
+    }
+
+    // Writeable events will mean data is ready to be forwarded to the Reciever
     if event.is_writable() {
-        // We can (likely) write to the socket without blocking.
-        println!("reading for {:?}", endpoint);
+
         let reader = match &endpoint.peer_reader {
             Some(p) => p,
             None => {
@@ -40,18 +57,13 @@ pub fn handle_client_event (
             return Ok(true);
         }
 
-        // if we drained the pipe, deregister the stream
-        // will be interested again when something is written
-        /*if read == 0 {
-            
-        }*/
-
         println!("read {} bytes from pipe", read);
         
     }
 
+    
+    // Readable events will be file data from the Sender
     if event.is_readable() {
-        // We can (likely) read from the socket without blocking.
 
         let writer = match &endpoint.peer_writer {
             Some(p) => p,
@@ -72,6 +84,7 @@ pub fn handle_client_event (
 
         // check if connection is closed
         if sent <= 0 {
+            registry.deregister(&mut endpoint.stream)?;
             return Ok(true);
         }
 
