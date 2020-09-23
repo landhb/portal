@@ -1,6 +1,8 @@
 //#[macro_use]
 //extern crate lazy_static;
 extern crate portal_lib as portal;
+
+use portal::Portal;
 use std::collections::HashMap;
 use std::error::Error;
 use std::cell::{RefCell};
@@ -16,6 +18,7 @@ use mio::{Events, Interest, Poll, Token};
 use os_pipe::{pipe,PipeReader,PipeWriter};
 
 mod handlers;
+mod networking;
 
 // Some tokens to allow us to identify which event is for which socket.
 const SERVER: Token = Token(0);
@@ -63,6 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Use to reference existing endpoints and their polling tokens
     let endpoints: Rc<RefCell<HashMap<Token, Endpoint>>> = Rc::new(RefCell::new(HashMap::new()));
     let mut lookup_token: HashMap<String, Token> = HashMap::new();
+
     
     // Start an event loop.
     loop {
@@ -72,17 +76,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         // Process each event.
         for event in events.iter() {
-            // We can use the token we previously provided to `register` to
-            // determine for which socket the event is.
+
+
             match event.token() {
 
                 SERVER => loop {
 
                     // If this is an event for the server, it means a connection
                     // is ready to be accepted.
-                    //
-                    // Accept the connection and drop it immediately. This will
-                    // close the socket and notify the client of the EOF.
                     let (mut connection, addr) = match server.accept() {
                         Ok((s, addr)) => (s,addr),
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -96,17 +97,31 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     println!("[+] Got connection from {:?}", addr);
 
-                    // add the connection to the endpoint registry
-                    let req = portal::portal_get_request(&mut connection)?;
+                    let mut received_data = Vec::with_capacity(4096);
+                    match networking::recv_generic(&mut connection,&mut received_data) {
+                        Ok(_) => {},
+                        Err(_) => {
+                            continue;
+                        }
+                    }
+
+                    // attempt to recieve a portal request
+                    let mut req = match Portal::parse(received_data) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            println!("{:?}", e);
+                            continue;
+                        },
+                    };
 
                     println!("req: {:?}", req);
 
-                    match req.direction {
+                    match req.get_direction() {
 
-                        portal::Direction::Sender => {
+                        Some(portal::Direction::Sender) => {
 
                             // ensure ID was provided
-                            if req.id == None  {
+                            if req.get_id().is_none()  {
                                 continue;
                             }
 
@@ -114,7 +129,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             let (reader, writer) = pipe().unwrap();
 
                             // lookup reciever's ID
-                            let peer_token = match lookup_token.get(req.id.as_ref().unwrap()) {
+                            let peer_token = match lookup_token.get(&req.get_id().unwrap()) {
                                 Some(p) => p,
                                 None => {
                                     connection.shutdown(std::net::Shutdown::Both)?;
@@ -128,16 +143,23 @@ fn main() -> Result<(), Box<dyn Error>> {
                             let mut peer = match ref_endpoints.get_mut(&peer_token) {
                                 Some(p) => p,
                                 None => {
-                                    lookup_token.remove(req.id.as_ref().unwrap());
+                                    lookup_token.remove(&req.get_id().unwrap());
                                     connection.shutdown(std::net::Shutdown::Both)?;
                                     continue;
                                 },
                             };
 
+                            // if the peer already has a connection, disregard this one
+                            if !peer.peer_reader.is_none() {
+                                connection.shutdown(std::net::Shutdown::Both)?;
+                                continue;
+                            }
+                            
+
                             // send the peer's public key to the sender
-                            match portal::portal_send_response(&mut connection, 
-                                                peer.id.as_ref().unwrap().clone(), 
-                                                Some(peer.pubkey.as_ref().unwrap().clone())) {
+                            req.set_pubkey(Some(peer.pubkey.as_ref().unwrap().clone()));
+                            let resp = req.serialize()?;
+                            match networking::send_generic(&mut connection, resp) {
                                 Ok(_) => {},
                                 Err(e) => {
                                     println!("error while sending resp {:?}", e);
@@ -160,8 +182,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                             // create this endpoint
                             let endpoint = Endpoint {
-                                id: req.id,
-                                dir: req.direction,
+                                id: req.get_id(),
+                                dir: req.get_direction().unwrap(),
                                 pubkey: peer.pubkey.clone(),
                                 stream: connection,
                                 peer_reader: None,
@@ -175,18 +197,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                             ref_endpoints.entry(token).or_insert(endpoint);
 
                         }
-                        portal::Direction::Reciever => {
+                        Some(portal::Direction::Reciever) => {
 
                             // check that pubkey was provided & send the unique ID
                             // associated with this key upload
-                            if req.pubkey == None {
+                            if req.get_pubkey() == None {
                                 continue;
                             }
 
-                            // send confirmation of registration and unique ID
+                            // Generate a unique ID for this reciever
                             let uuid = Uuid::new_v4().to_hyphenated().to_string();
-                            let key_field = req.pubkey.clone();
-                            match portal::portal_send_response(&mut connection, uuid.clone(), req.pubkey) {
+                            let key_field = req.get_pubkey();
+
+                            // send confirmation of registration and unique ID
+                            req.set_id(uuid.clone());
+                            let resp = req.serialize()?;
+                            match networking::send_generic(&mut connection, resp) {
                                 Ok(_) => {},
                                 Err(e) => {
                                     println!("error while sending resp {:?}", e);
@@ -201,7 +227,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             
                             let endpoint = Endpoint {
                                 id: Some(uuid.clone()),
-                                dir: req.direction,
+                                dir: req.get_direction().unwrap(),
                                 pubkey: key_field,
                                 stream: connection,
                                 peer_writer: None,
@@ -216,7 +242,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                         }
 
-
+                        _ => {continue;}
 
                     }
                     

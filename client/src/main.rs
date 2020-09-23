@@ -110,12 +110,11 @@ fn transfer(req: portal::Request, addr: std::net::SocketAddr, is_reciever: bool)
 
         if is_reciever {
             println!("[+] Your transfer ID is: {:?}", resp.unwrap().id);
-            interest_opts = Interest::READABLE;
             break;
         }
 
         pubkey = resp.unwrap().pubkey;
-        interest_opts = Interest::WRITABLE;
+        interest_opts |= Interest::WRITABLE;
         println!("[+] Received client public key: {:?}", pubkey);
         break;
     }

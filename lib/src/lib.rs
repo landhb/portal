@@ -1,159 +1,167 @@
-use anyhow::{Result,Error};
-
-use std::io::{self,Read,Write};
-//use std::error::Error;
-use mio::net::TcpStream;
+use anyhow::Result;
 use serde::{Serialize, Deserialize};
+use std::fs::File;
+use std::io::Read;
+use memmap::Mmap;
 
-mod errors;
+pub mod errors;
 
-use errors::PortalError;
+//use errors::PortalError;
 
+
+/**
+ * The primary interface into the library
+ */
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct Portal {
+    direction: Option<Direction>,
+    id: Option<String>,
+    pubkey: Option<String>,
+}
+
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum Direction {
     Sender,
     Reciever,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct Request {
-    pub direction: Direction,
-    pub id: Option<String>,
-    pub pubkey: Option<String>,
-}
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct Response {
-    pub id: String,
-    pub pubkey: String,
-}
-
-fn would_block(err: &io::Error) -> bool {
-    err.kind() == io::ErrorKind::WouldBlock
-}
-
-fn interrupted(err: &io::Error) -> bool {
-    err.kind() == io::ErrorKind::Interrupted
+#[derive(Debug)]
+pub struct PortalFile<'a, T: 'a> {
+    v: &'a [T],
+    size: usize,
+    settings: &'a Portal,
 }
 
 
+impl<'a,T> Iterator for PortalFile<'a,T> 
+where T:Copy 
+{
+    type Item = &'a [T];
 
-fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> Result<usize> {
-    //let mut connection_closed = false;
-    //let mut received_data = Vec::with_capacity(4096);
-    loop {
-        let mut buf = [0; 256];
-        match connection.read(&mut buf) {
-            Ok(0) => {
-                // Reading 0 bytes means the other side has closed the
-                // connection or is done writing, then so are we.
-                //connection_closed = true;
-                break;
-            }
-            Ok(n) => received_data.extend_from_slice(&buf[..n]),
-            // Would block "errors" are the OS's way of saying that the
-            // connection is not actually ready to perform this I/O operation.
-            Err(ref err) if would_block(err) => break,
-            Err(ref err) if interrupted(err) => continue,
-            // Other errors we'll consider fatal.
-            Err(err) => return Err(err.into()),
+    // The return type is `Option<T>`:
+    //     * When the `Iterator` is finished, `None` is returned.
+    //     * Otherwise, the next value is wrapped in `Some` and returned.
+    fn next(&mut self) -> Option<Self::Item> {
+
+        if self.v.len() <= 0 {
+            return None;
+        }
+
+        // return up to the next chunk size
+        if self.size > self.v.len() {
+            let ret = Some(&self.v[..self.v.len()]);
+            self.v = &self.v[0..0];
+            ret
+        } else {
+            let ret = Some(&self.v[..self.size]);
+            self.v = &self.v[self.size..];
+            ret
+        }        
+    }
+} 
+
+
+
+impl Portal {
+    
+    /**
+     * Initialize 
+     */
+    pub fn init(direction: Option<Direction>, pubkey: Option<String>) -> Portal {
+        Portal {
+            direction: direction,
+            id: None,
+            pubkey: pubkey,
         }
     }
 
-    Ok(received_data.len())
-}
-
-fn send_generic(connection: &mut TcpStream, data: Vec<u8>) -> Result<()> {
-
-    match connection.write(&data) {
-        // We want to write the entire `DATA` buffer in a single go. If we
-        // write less we'll return a short write error (same as
-        // `io::Write::write_all` does).
-        Ok(n) if n < data.len() => return Err(Error::new(PortalError::BadRegistration)),
-        Ok(_) => {
-            Ok(())
-        }
-        // Would block "errors" are the OS's way of saying that the
-        // connection is not actually ready to perform this I/O operation.
-        Err(ref err) if would_block(err) => {
-            return Err(PortalError::WouldBlock.into())
-        }
-        // Got interrupted (how rude!), we'll try again.
-        Err(ref err) if interrupted(err) => {
-            //return handle_connection_event(registry, connection, event)
-            return Err(PortalError::Interrupted.into())
-        }
-        // Other errors we'll consider fatal.
-        Err(err) => return Err(err.into()),
+    /**
+     * Construct from data 
+     */
+    pub fn parse(data: Vec<u8>) -> Result<Portal> {
+        Ok(bincode::deserialize(&data)?)
     }
-}
 
-pub fn portal_get_request(mut connection: &mut TcpStream) -> Result<Request> { 
+    pub fn serialize(&self) -> Result<Vec<u8>> {
+        Ok(bincode::serialize(&self)?)
+    }
 
-    let mut received_data = Vec::with_capacity(4096);
-    recv_generic(&mut connection,&mut received_data)?;
+    pub fn get_id(&self) -> Option<String> {
+        self.id.clone()
+    }
 
-    let req: Request = bincode::deserialize(&received_data)?;
+    pub fn get_pubkey(&self) -> Option<String> {
+        self.pubkey.clone()
+    }
 
-    Ok(req)
-    
-}
+    pub fn get_direction(&self) -> Option<Direction> {
+        self.direction.clone()
+    }
 
-pub fn portal_get_response(mut connection: &mut TcpStream) -> Result<Option<Response>> { 
+    pub fn set_id(&mut self, id: String) {
+        self.id = Some(id);
+    }
 
-    
-    let mut received_data = Vec::with_capacity(4096);
-    recv_generic(&mut connection,&mut received_data)?;
+    pub fn set_direction(&mut self, direction: Option<Direction>) {
+        self.direction = direction;
+    }
 
-    if received_data.len() == 0 {
-        return Ok(None);
-    }   
+    pub fn set_pubkey(&mut self, pubkey: Option<String>){
+        self.pubkey = pubkey;
+    }
 
-    let resp: Response = bincode::deserialize(&received_data)?;
+    /*
+     * mmap's a file into memory 
+     */
+    pub fn load_file<'a>(&'a self, f: &str) -> Result<Vec<u8>>  {
+        let file = File::open(f)?;
+        let mmap = unsafe { Mmap::map(&file)?  };
+        Ok(mmap[..].to_vec())
+    }
 
-    Ok(Some(resp))
-    
-}
+    /**
+     * Returns an iterator over the chunks to send it over the
+     * network
+     */
+    pub fn get_chunks<'a>(&'a self, data: &'a Vec<u8>, chunk_size: usize) -> Result<PortalFile<u8>> {
+        Ok(PortalFile{
+            v: &data,
+            size: chunk_size,
+            settings: &self,
+        })
+    }
 
-pub fn portal_send_response(connection: &mut TcpStream, id: String, pubkey: Option<String>) -> Result<()> {
-    let response = Response {
-        id: id,
-        pubkey: pubkey.unwrap(),
-    };
-    println!("{:?}", response);
-    let encoded: Vec<u8> = bincode::serialize(&response)?;
-    return send_generic(connection,encoded);
-}
-
-
-pub fn portal_send_request(connection: &mut TcpStream, request: Request) -> Result<()> {
-    let encoded: Vec<u8> = bincode::serialize(&request)?;
-    return send_generic(connection,encoded);
-}
-
-
-
-pub fn portal_send_data(connection: &mut TcpStream, data: Vec<u8>) -> Result<()> {
-
-    // do encryption here
-
-    return send_generic(connection,data);
-}
-
-pub fn portal_recv_data(mut connection: &mut TcpStream, mut data: &mut Vec<u8>) -> Result<usize> {
-    //let received_data = recv_generic(&mut connection)?;
-
-
-    //let mut received_data = Vec::with_capacity(4096);
-    recv_generic(&mut connection,&mut data)?;
-    // do decryption here
-    Ok(data.len())    
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{Portal,Direction,PortalFile};
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn portalfile_iterator() {
+        let dir = Some(Direction::Sender);
+        let key = Some("test".to_string());
+        let portal = Portal::init(dir,key);
+
+        // TODO change test file
+        let file = portal.load_file("/etc/passwd").unwrap();
+
+        let mut chunk_size = 10;
+        let chunks = portal.get_chunks(&file,chunk_size).unwrap();
+        for (i,v) in chunks.into_iter().enumerate() {
+            println!("{:?} {:?}", i, v.len());
+            assert!(v.len() <= chunk_size);
+        }
+
+
+        let mut chunk_size = 1024;
+        let chunks = portal.get_chunks(&file,chunk_size).unwrap();
+        for (i,v) in chunks.into_iter().enumerate() {
+            println!("{:?} {:?}", i, v.len());
+            assert!(v.len() <= chunk_size);
+        }
+
     }
 }
