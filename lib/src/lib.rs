@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde::{Serialize, Deserialize};
 use std::fs::File;
-use std::io::Read;
 use memmap::Mmap;
 
 pub mod errors;
@@ -26,16 +25,20 @@ pub enum Direction {
     Reciever,
 }
 
+pub struct PortalFile {
+    mmap: Mmap,
+}
+
 
 #[derive(Debug)]
-pub struct PortalFile<'a, T: 'a> {
+pub struct PortalChunks<'a, T: 'a> {
     v: &'a [T],
-    size: usize,
+    chunk_size: usize,
     settings: &'a Portal,
 }
 
 
-impl<'a,T> Iterator for PortalFile<'a,T> 
+impl<'a,T> Iterator for PortalChunks<'a,T> 
 where T:Copy 
 {
     type Item = &'a [T];
@@ -45,20 +48,22 @@ where T:Copy
     //     * Otherwise, the next value is wrapped in `Some` and returned.
     fn next(&mut self) -> Option<Self::Item> {
 
-        if self.v.len() <= 0 {
-            return None;
-        }
-
         // return up to the next chunk size
-        if self.size > self.v.len() {
-            let ret = Some(&self.v[..self.v.len()]);
-            self.v = &self.v[0..0];
-            ret
-        } else {
-            let ret = Some(&self.v[..self.size]);
-            self.v = &self.v[self.size..];
-            ret
-        }        
+        if self.v.is_empty() {
+            return None;
+        } 
+
+        let chunksz = std::cmp::min(self.v.len(), self.chunk_size);
+        let (beg,end) = self.v.split_at(chunksz);
+
+        // update next slice 
+        self.v = end; 
+
+        // TODO: encrypt current slice
+
+        // return current slice
+        Some(beg)
+               
     }
 } 
 
@@ -115,20 +120,20 @@ impl Portal {
     /*
      * mmap's a file into memory 
      */
-    pub fn load_file<'a>(&'a self, f: &str) -> Result<Vec<u8>>  {
+    pub fn load_file<'a>(&'a self, f: &str) -> Result<PortalFile>  {
         let file = File::open(f)?;
         let mmap = unsafe { Mmap::map(&file)?  };
-        Ok(mmap[..].to_vec())
+        Ok(PortalFile{mmap: mmap})
     }
 
     /**
      * Returns an iterator over the chunks to send it over the
      * network
      */
-    pub fn get_chunks<'a>(&'a self, data: &'a Vec<u8>, chunk_size: usize) -> Result<PortalFile<u8>> {
-        Ok(PortalFile{
-            v: &data,
-            size: chunk_size,
+    pub fn get_chunks<'a>(&'a self, data: &'a PortalFile, chunk_size: usize) -> Result<PortalChunks<'a,u8>> {
+        Ok(PortalChunks{
+            v: &data.mmap[..], // TODO: verify that this is zero-copy/move
+            chunk_size: chunk_size,
             settings: &self,
         })
     }
@@ -137,7 +142,7 @@ impl Portal {
 
 #[cfg(test)]
 mod tests {
-    use super::{Portal,Direction,PortalFile};
+    use super::{Portal,Direction};
 
     #[test]
     fn portalfile_iterator() {
@@ -148,18 +153,16 @@ mod tests {
         // TODO change test file
         let file = portal.load_file("/etc/passwd").unwrap();
 
-        let mut chunk_size = 10;
+        let chunk_size = 10;
         let chunks = portal.get_chunks(&file,chunk_size).unwrap();
-        for (i,v) in chunks.into_iter().enumerate() {
-            println!("{:?} {:?}", i, v.len());
+        for v in chunks.into_iter() {
             assert!(v.len() <= chunk_size);
         }
 
 
-        let mut chunk_size = 1024;
+        let chunk_size = 1024;
         let chunks = portal.get_chunks(&file,chunk_size).unwrap();
-        for (i,v) in chunks.into_iter().enumerate() {
-            println!("{:?} {:?}", i, v.len());
+        for v in chunks.into_iter() {
             assert!(v.len() <= chunk_size);
         }
 
