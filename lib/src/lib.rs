@@ -2,10 +2,11 @@ use anyhow::Result;
 use serde::{Serialize, Deserialize};
 use std::fs::File;
 use memmap::Mmap;
-
+use std::fs::OpenOptions;
+use std::cell::RefCell;
 pub mod errors;
 
-//use errors::PortalError;
+use errors::PortalError;
 
 
 /**
@@ -25,8 +26,16 @@ pub enum Direction {
     Reciever,
 }
 
-pub struct PortalFile {
+pub struct PortalFileImmutable {
     mmap: Mmap,
+}
+
+pub struct PortalFileMut {
+    file: RefCell<File>,
+    //mmap: MmapMut,
+    /*len: usize,
+    used: usize,
+    offset: usize,*/
 }
 
 
@@ -67,17 +76,72 @@ where T:Copy
     }
 } 
 
+pub enum PortalFile {
+    Immutable(PortalFileImmutable),
+    Mutable(PortalFileMut),
+}
 
+impl PortalFile {
+
+    fn get_bytes(&self) -> Result<&[u8]> {
+        match self {
+            PortalFile::Immutable(inner) => Ok(&inner.mmap[..]),
+            PortalFile::Mutable(_inner) => Err(PortalError::Mutablility.into()),
+        }
+    }
+
+    pub fn write(&self, data: &[u8]) -> Result<usize> {
+        match self {
+            PortalFile::Immutable(_inner) => Err(PortalError::Mutablility.into()),
+            PortalFile::Mutable(inner) => {return inner.write(data);},
+        }
+    }
+}
+
+
+
+impl PortalFileMut {
+
+    fn write(&self, data: &[u8]) -> Result<usize> {
+        use std::io::Write;
+
+        /*let remaining = self.len - self.used;
+        if data.len() > remaining {
+            let diff = data.len() - remaining;
+            //self.file.set_len(self.len + diff)?;
+            self.len += diff;
+        } */
+
+        self.file.borrow_mut().write_all(data)?;
+        //(&mut self.mmap[self.offset..]).write_all(data)?;
+        //self.offset += data.len();
+        Ok(data.len())
+    } 
+
+}
+
+
+impl Drop for PortalFileMut {
+
+    // attempt to flush to disk
+    fn drop(&mut self) {
+        match self.file.get_mut().sync_all() {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+    }
+
+} 
 
 impl Portal {
     
     /**
      * Initialize 
      */
-    pub fn init(direction: Option<Direction>, pubkey: Option<String>) -> Portal {
+    pub fn init(direction: Option<Direction>, id: Option<String>, pubkey: Option<String>) -> Portal {
         Portal {
             direction: direction,
-            id: None,
+            id: id,
             pubkey: pubkey,
         }
     }
@@ -85,8 +149,8 @@ impl Portal {
     /**
      * Construct from data 
      */
-    pub fn parse(data: Vec<u8>) -> Result<Portal> {
-        Ok(bincode::deserialize(&data)?)
+    pub fn parse(data: &Vec<u8>) -> Result<Portal> {
+        Ok(bincode::deserialize(data)?)
     }
 
     pub fn serialize(&self) -> Result<Vec<u8>> {
@@ -118,24 +182,51 @@ impl Portal {
     }
 
     /*
-     * mmap's a file into memory 
+     * mmap's a file into memory for reading
      */
     pub fn load_file<'a>(&'a self, f: &str) -> Result<PortalFile>  {
         let file = File::open(f)?;
         let mmap = unsafe { Mmap::map(&file)?  };
-        Ok(PortalFile{mmap: mmap})
+        Ok(PortalFile::Immutable(PortalFileImmutable{mmap: mmap}))
+    }
+
+    /*
+     * mmap's a file into memory for writing
+     */
+    pub fn create_file<'a>(&'a self, f: &str) -> Result<PortalFile>  {
+
+        let file = OpenOptions::new()
+                       .read(true)
+                       .write(true)
+                       .create(true)
+                       .open(&f)?;
+
+        //let mmap = unsafe { Mmap::map(&file)?  };
+        //let writer = mmap.make_mut()?;
+        Ok(PortalFile::Mutable(PortalFileMut{
+            file: RefCell::new(file)}))
+            //mmap: writer, 
+            //len: 0,
+            //used: 0,
+            //offset: 0}))
     }
 
     /**
      * Returns an iterator over the chunks to send it over the
      * network
      */
-    pub fn get_chunks<'a>(&'a self, data: &'a PortalFile, chunk_size: usize) -> Result<PortalChunks<'a,u8>> {
-        Ok(PortalChunks{
-            v: &data.mmap[..], // TODO: verify that this is zero-copy/move
+    pub fn get_chunks<'a>(&'a self, data: &'a PortalFile, chunk_size: usize) -> PortalChunks<'a,u8> {
+        
+        let bytes = match data.get_bytes() {
+            Ok(data) => data,
+            Err(_) => &[], // iterator will be empty for writer files
+        };
+
+        PortalChunks{
+            v: &bytes, // TODO: verify that this is zero-copy/move
             chunk_size: chunk_size,
             settings: &self,
-        })
+        }
     }
 
 }
@@ -148,23 +239,46 @@ mod tests {
     fn portalfile_iterator() {
         let dir = Some(Direction::Sender);
         let key = Some("test".to_string());
-        let portal = Portal::init(dir,key);
+        let portal = Portal::init(dir,None,key);
 
         // TODO change test file
         let file = portal.load_file("/etc/passwd").unwrap();
 
         let chunk_size = 10;
-        let chunks = portal.get_chunks(&file,chunk_size).unwrap();
+        let chunks = portal.get_chunks(&file,chunk_size);
         for v in chunks.into_iter() {
             assert!(v.len() <= chunk_size);
         }
 
 
         let chunk_size = 1024;
-        let chunks = portal.get_chunks(&file,chunk_size).unwrap();
+        let chunks = portal.get_chunks(&file,chunk_size);
         for v in chunks.into_iter() {
             assert!(v.len() <= chunk_size);
         }
 
     }
+
+    #[test]
+    fn portal_createfile() {
+        let dir = Some(Direction::Sender);
+        let key = Some("test".to_string());
+        let portal = Portal::init(dir,None,key);
+
+        // TODO change test file
+        let file_src = portal.load_file("/etc/passwd").unwrap();
+        let mut file_dst = portal.create_file("/tmp/passwd").unwrap();
+
+        let chunk_size = 1024;
+        let chunks = portal.get_chunks(&file_src,chunk_size);
+        for v in chunks.into_iter() {
+
+            assert!(v.len() <= chunk_size);
+
+            // test writing chunk
+            file_dst.write(&v).unwrap();
+        }
+
+    }
+
 }

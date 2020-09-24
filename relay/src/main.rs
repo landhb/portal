@@ -98,15 +98,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                     println!("[+] Got connection from {:?}", addr);
 
                     let mut received_data = Vec::with_capacity(4096);
-                    match networking::recv_generic(&mut connection,&mut received_data) {
-                        Ok(_) => {},
-                        Err(_) => {
-                            continue;
+                    while received_data.len() == 0 {
+                        match networking::recv_generic(&mut connection,&mut received_data) {
+                            Ok(_) => {},
+                            Err(_) => {
+                                break;
+                            }
                         }
                     }
 
+                    println!("{:?}", received_data.len());
+
                     // attempt to recieve a portal request
-                    let mut req = match Portal::parse(received_data) {
+                    let mut req = match Portal::parse(&received_data) {
                         Ok(r) => r,
                         Err(e) => {
                             println!("{:?}", e);
@@ -220,6 +224,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             }
 
+                            println!("[+] Sent response {:?}", req);
+
                             // We need to register for READABLE events to detect a closed connection
                             let token = next(&mut unique_token);
                             poll.registry().register(&mut connection, token,Interest::READABLE)?;
@@ -266,6 +272,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // perform the action
                     let done = handlers::handle_client_event(poll.registry(), client, event)?;
 
+                    println!("handler finished {:?}", done);
+
                     // if we read in new data from the sender
                     // we are now interested in WRITEABLE events for our reciever 
                     if event.is_readable() && client.dir == portal::Direction::Sender {
@@ -287,12 +295,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                             },
                             Err(e) => {panic!("{:?}",e);},
                         }
-                    }
 
-                    if done {
-                        println!("Removing endpoint for {:?}", token);
-                        lookup_token.remove(&id);
-                        ref_endpoints.remove(&token);
+                        if done {
+                            ref_endpoints.remove(&token);
+                        }
+                    } else {
+                        // only the reciever should remove the lookup token on close
+                        if done {
+                            println!("Removing endpoint for {:?}", token);
+                            lookup_token.remove(&id);
+                            ref_endpoints.remove(&token);
+                        }
                     }
                 }
             }

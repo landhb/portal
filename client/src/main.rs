@@ -1,25 +1,15 @@
 extern crate portal_lib as portal;
 
-use mio::net::TcpStream;
-use mio::{Events, Interest, Poll, Token};
-use mio::event::Event;
+use portal::Portal;
+use std::net::TcpStream;
+use std::io::{Read,Write};
+//use mio::{Events, Interest, Poll, Token};
+//use mio::event::Event;
 use std::error::Error;
 use clap::{Arg, App, SubCommand,AppSettings};
 use anyhow::Result;
-const CLIENT: Token = Token(0);
 
-
-
-fn handle_read(mut conn: &mut TcpStream, _event: &Event) -> Result<usize> { //, _event: &Event
-    let mut received_data = Vec::with_capacity(4096);
-    portal::portal_recv_data(&mut conn, &mut received_data)
-}
-
-fn handle_write(mut conn: &mut TcpStream, _event: &Event) -> Result<()> { // , _event: &Event
-    let data = *b"Hello, World!";
-    portal::portal_send_data(&mut conn,data.to_vec())
-}
-
+mod networking;
 
 fn main() -> Result<(), Box<dyn Error>> {
 
@@ -33,6 +23,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                               .arg(Arg::with_name("filename")
                                   .short("f")
                                   .takes_value(true)
+                                  .required(true)
                                   .help("file to transfer"))
                               .arg(Arg::with_name("id")
                                   .short("i")
@@ -57,24 +48,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     match matches.subcommand() {
         ("send", Some(args)) =>  { 
 
-            let req = portal::Request {
-                direction: portal::Direction::Sender,
-                id: Some(args.value_of("id").unwrap().to_string()),
-                pubkey: None,
-            };
+            let req = Portal::init(
+                Some(portal::Direction::Sender),
+                Some(args.value_of("id").unwrap().to_string()),
+                None,
+            );
 
-            transfer(req,addr, false)?;
+            transfer(req,args.value_of("filename"),addr, false)?;
             
         },
-        ("recv", Some(_args)) =>  { 
+        ("recv", Some(args)) =>  { 
 
-            let req = portal::Request {
-                direction: portal::Direction::Reciever,
-                id: None,
-                pubkey: Some(String::from("Test")),
-            };
+            let req = Portal::init(
+                Some(portal::Direction::Reciever),
+                None,
+                Some(String::from("Test")),
+            );
 
-            transfer(req,addr, true)?;
+            transfer(req,args.value_of("filename"),addr, true)?;
 
         },
         _ => {println!("Please provide a valid subcommand. Run portal -h for more information.");},
@@ -83,74 +74,59 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn transfer(req: portal::Request, addr: std::net::SocketAddr, is_reciever: bool) -> Result<(), Box<dyn Error>>  {
-
-    // Create a poll instance.
-    let mut poll = Poll::new()?;
-
-    // Create storage for events.
-    let mut events = Events::with_capacity(128);
+fn transfer(portal: Portal, file_path: Option<&str>, addr: std::net::SocketAddr, is_reciever: bool) -> Result<(), Box<dyn Error>>  {
 
     
     // Setup the client socket.
     let mut client = TcpStream::connect(addr)?;
 
 
-    portal::portal_send_request(&mut client, req)?;
+    let req = portal.serialize()?;
+    client.write_all(&req)?;
 
-
-    // Wait until we get our transfer ID or the peer's public key
+    let mut received_data = Vec::with_capacity(4096);
+    let resp;
     let pubkey;
-    let mut interest_opts = Interest::READABLE;
-    while let Ok(resp) = portal::portal_get_response(&mut client) {
+    let file;
 
-        if resp == None {
-            continue;
+    println!("[+] Connected {:?}", client);
+
+    let data = networking::recv_generic(&mut client, &mut received_data)?;    
+
+    println!("[+] recieved {:?}", data);
+    // attempt to deserialize a portal request
+    resp = Portal::parse(&received_data.to_vec())?;
+        
+    if is_reciever {
+      
+        println!("[+] Your transfer ID is: {:?}", resp.get_id().unwrap());
+        file = portal.create_file("/tmp/test")?;
+        let mut len = 1;
+        while len != 0 {
+          received_data.clear();
+          len = networking::recv_generic(&mut client, &mut received_data)?;
+          println!("[+] recieved {:?}", len);
+          file.write(&received_data)?;
         }
 
-        if is_reciever {
-            println!("[+] Your transfer ID is: {:?}", resp.unwrap().id);
-            break;
-        }
 
-        pubkey = resp.unwrap().pubkey;
-        interest_opts |= Interest::WRITABLE;
-        println!("[+] Received client public key: {:?}", pubkey);
-        break;
+    } else {
+
+      pubkey = resp.get_pubkey().unwrap();
+      file = portal.load_file(file_path.unwrap())?;
+      println!("[+] Received client public key: {:?}", pubkey);
+
+      // This will be empty for files created with create_file()
+      let mut chunks = portal.get_chunks(&file,1024);
+
+      for data in chunks.into_iter() {
+        println!("[+] sent {:?}", data.len());
+        client.write_all(&data)?;
+      }
     }
-
-
-    poll.registry().register(&mut client, CLIENT,interest_opts)?;
+    
 
     
-    // main transfer loop
-    loop {
 
-        // Poll Mio for events, blocking until we get an event.
-        poll.poll(&mut events, None)?;
-
-        println!("poll returned");
-
-        // Process each event.
-        for event in events.iter() {
-
-            println!("got event {:?}", event);
-           
-            if event.is_writable() {
-                handle_write(&mut client, &event)?;               
-            }
-
-            if event.is_readable() {
-                let read = handle_read(&mut client, &event)?;
-                println!("finished read {:?}", read); 
-            }
-
-        }
-
-
-
-    } 
-
+    Ok(())
 }
-
-

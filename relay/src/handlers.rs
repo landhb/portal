@@ -23,12 +23,6 @@ pub fn handle_client_event (
     event: &Event) -> Result<bool> {
 
 
-    // Check for closed connections first
-    if event.is_error() || event.is_read_closed() || event.is_write_closed() {
-        registry.deregister(&mut endpoint.stream)?;
-        return Ok(true);
-    }
-
     // Writeable events will mean data is ready to be forwarded to the Reciever
     if event.is_writable() {
 
@@ -90,6 +84,12 @@ pub fn handle_client_event (
 
         println!("wrote {} bytes to pipe", sent);
 
+    }
+
+    // Check for closed connections before returning
+    if event.is_error() || event.is_read_closed() || event.is_write_closed() {
+        registry.deregister(&mut endpoint.stream)?;
+        return Ok(true);
     }
 
     Ok(false)
