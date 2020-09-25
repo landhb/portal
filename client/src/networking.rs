@@ -1,9 +1,7 @@
 use std::net::TcpStream;
-use std::io::{self,Read,Write};
-use anyhow::{Result,Error};
+use std::io::{self,Read};
+use anyhow::Result;
 
-
-use portal::errors::PortalError;
 
 fn would_block(err: &io::Error) -> bool {
     err.kind() == io::ErrorKind::WouldBlock
@@ -17,7 +15,7 @@ fn interrupted(err: &io::Error) -> bool {
 pub fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> Result<usize> {
     let mut total = 0;
     loop {
-        let mut buf = [0; 256];
+        let mut buf = [0; 8192];
         match connection.read(&mut buf) {
             Ok(0) => {
                 // Reading 0 bytes means the other side has closed the

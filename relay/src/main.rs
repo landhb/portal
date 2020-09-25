@@ -14,7 +14,7 @@ use std::rc::Rc;
 use uuid::Uuid;
 //use std::sync::Mutex;
 use mio::net::{TcpListener, TcpStream};
-use mio::{Events, Interest, Poll, Token};
+use mio::{Events, Ready, Poll, Token, PollOpt}; //Interest, Poll, Token};
 use os_pipe::{pipe,PipeReader,PipeWriter};
 
 mod handlers;
@@ -47,18 +47,18 @@ fn next(current: &mut Token) -> Token {
 fn main() -> Result<(), Box<dyn Error>> {
     
     // Create a poll instance.
-    let mut poll = Poll::new()?;
+    let poll = Poll::new()?;
 
     // Create storage for events.
     let mut events = Events::with_capacity(128);
 
     // Setup the server socket.
     let addr = "127.0.0.1:13265".parse()?;
-    let mut server = TcpListener::bind(addr)?;
+    let mut server = TcpListener::bind(&addr)?;
 
     // Start listening for incoming connections.
-    poll.registry()
-        .register(&mut server, SERVER, Interest::READABLE)?;
+    //poll.registry()
+    poll.register(&mut server, SERVER, Ready::readable(), PollOpt::level())?;
 
 
     let mut unique_token = Token(SERVER.0+1);
@@ -181,8 +181,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                             // set socket to READABLE-interest only, after we confirm the existence
                             // of the receiver, this client will only be sending
-                            poll.registry().register(&mut connection, token,Interest::READABLE)?;
-
+                            //poll.registry().register(&mut connection, token,Interest::READABLE)?;
+                            poll.register(&mut connection, token, Ready::readable(),PollOpt::level())?;
 
                             // create this endpoint
                             let endpoint = Endpoint {
@@ -228,8 +228,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                             // We need to register for READABLE events to detect a closed connection
                             let token = next(&mut unique_token);
-                            poll.registry().register(&mut connection, token,Interest::READABLE)?;
-
+                            //poll.registry().register(&mut connection, token,Interest::READABLE)?;
+                            poll.register(&mut connection, token, Ready::readable(),PollOpt::level())?;
                             
                             let endpoint = Endpoint {
                                 id: Some(uuid.clone()),
@@ -270,13 +270,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let id = client.id.as_ref().unwrap().to_string();
 
                     // perform the action
-                    let done = handlers::handle_client_event(poll.registry(), client, event)?;
+                    let done = handlers::handle_client_event(&poll, client, &event)?;
 
                     println!("handler finished {:?}", done);
 
                     // if we read in new data from the sender
                     // we are now interested in WRITEABLE events for our reciever 
-                    if event.is_readable() && client.dir == portal::Direction::Sender {
+                    if event.readiness().is_readable() && client.dir == portal::Direction::Sender {
 
                         let token_val = client.peer_token.as_ref().unwrap().0;
 
@@ -288,25 +288,23 @@ fn main() -> Result<(), Box<dyn Error>> {
                             },
                         };
 
-                        match poll.registry().register(&mut peer.stream, Token(token_val),Interest::WRITABLE) {
+                        match poll.register(&mut peer.stream, Token(token_val),Ready::writable(),PollOpt::level()) {
                             Ok(_) => {},
                             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                                poll.registry().reregister(&mut peer.stream, Token(token_val),Interest::WRITABLE)?;
+                                poll.reregister(&mut peer.stream, Token(token_val),Ready::writable(),PollOpt::level())?;
                             },
                             Err(e) => {panic!("{:?}",e);},
                         }
 
-                        if done {
-                            ref_endpoints.remove(&token);
-                        }
-                    } else {
-                        // only the reciever should remove the lookup token on close
-                        if done {
-                            println!("Removing endpoint for {:?}", token);
-                            lookup_token.remove(&id);
-                            ref_endpoints.remove(&token);
-                        }
+                    } 
+
+                    // only the reciever should remove the lookup token on close
+                    if done {
+                        println!("Removing endpoint for {:?}", token);
+                        lookup_token.remove(&id);
+                        ref_endpoints.remove(&token);
                     }
+                    
                 }
             }
         }

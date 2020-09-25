@@ -1,6 +1,6 @@
 extern crate portal_lib as portal;
 
-use mio::Registry;
+use mio::Poll;
 use crate::Endpoint;
 use mio::event::Event;
 use anyhow::Result;
@@ -18,13 +18,13 @@ use std::os::unix::io::AsRawFd;
  *  Sender socket -> Pipe -> Reciever Socket
  */
 pub fn handle_client_event (
-    registry: &Registry,
+    registry: &Poll,
     endpoint: &mut Endpoint,
     event: &Event) -> Result<bool> {
 
 
     // Writeable events will mean data is ready to be forwarded to the Reciever
-    if event.is_writable() {
+    if event.readiness().is_writable() {
 
         let reader = match &endpoint.peer_reader {
             Some(p) => p,
@@ -41,12 +41,13 @@ pub fn handle_client_event (
 
         let read;
         unsafe {
-            read = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 4096, libc::SPLICE_F_NONBLOCK);    
+            read = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 65535, libc::SPLICE_F_NONBLOCK);    
         }
 
 
         // check if connection is closed
-        if read <= 0 {
+        let errno = std::io::Error::last_os_error().raw_os_error();
+        if read <= 0 && (errno != Some(libc::EWOULDBLOCK) || errno != Some(libc::EAGAIN)) {
             registry.deregister(&mut endpoint.stream)?;
             return Ok(true);
         }
@@ -57,7 +58,7 @@ pub fn handle_client_event (
 
     
     // Readable events will be file data from the Sender
-    if event.is_readable() {
+    if event.readiness().is_readable() {
 
         let writer = match &endpoint.peer_writer {
             Some(p) => p,
@@ -73,11 +74,12 @@ pub fn handle_client_event (
 
         let sent;
         unsafe {
-            sent = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 4096, libc::SPLICE_F_NONBLOCK);  
+            sent = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 65535, libc::SPLICE_F_NONBLOCK);  
         }
 
         // check if connection is closed
-        if sent <= 0 {
+        let errno = std::io::Error::last_os_error().raw_os_error();
+        if sent <= 0 && (errno != Some(libc::EWOULDBLOCK) || errno != Some(libc::EAGAIN)) {
             registry.deregister(&mut endpoint.stream)?;
             return Ok(true);
         }
@@ -86,11 +88,11 @@ pub fn handle_client_event (
 
     }
 
-    // Check for closed connections before returning
+    /* Check for closed connections before returning
     if event.is_error() || event.is_read_closed() || event.is_write_closed() {
         registry.deregister(&mut endpoint.stream)?;
         return Ok(true);
-    }
+    } */
 
     Ok(false)
 }

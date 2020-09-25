@@ -2,9 +2,7 @@ extern crate portal_lib as portal;
 
 use portal::Portal;
 use std::net::TcpStream;
-use std::io::{Read,Write};
-//use mio::{Events, Interest, Poll, Token};
-//use mio::event::Event;
+use std::io::Write;
 use std::error::Error;
 use clap::{Arg, App, SubCommand,AppSettings};
 use anyhow::Result;
@@ -75,58 +73,63 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn transfer(portal: Portal, file_path: Option<&str>, addr: std::net::SocketAddr, is_reciever: bool) -> Result<(), Box<dyn Error>>  {
-
     
     // Setup the client socket.
     let mut client = TcpStream::connect(addr)?;
-
+    println!("[+] Connected {:?}", client);
 
     let req = portal.serialize()?;
     client.write_all(&req)?;
+    println!("[+] Sent {:?}", req);
 
-    let mut received_data = Vec::with_capacity(4096);
-    let resp;
-    let pubkey;
-    let file;
+    let mut received_data = Vec::with_capacity(8192);
+    networking::recv_generic(&mut client, &mut received_data)?;    
 
-    println!("[+] Connected {:?}", client);
-
-    let data = networking::recv_generic(&mut client, &mut received_data)?;    
-
-    println!("[+] recieved {:?}", data);
-    // attempt to deserialize a portal request
-    resp = Portal::parse(&received_data.to_vec())?;
+    // attempt to deserialize the portal response
+    let resp = Portal::parse(&received_data.to_vec())?;
+    println!("[+] Recieved {:?}", resp);
         
-    if is_reciever {
-      
-        println!("[+] Your transfer ID is: {:?}", resp.get_id().unwrap());
-        file = portal.create_file("/tmp/test")?;
-        let mut len = 1;
-        while len != 0 {
-          received_data.clear();
-          len = networking::recv_generic(&mut client, &mut received_data)?;
-          println!("[+] recieved {:?}", len);
-          file.write(&received_data)?;
+    let mut total = 0;
+
+    match is_reciever {
+
+        true => {
+
+            println!("[+] Your transfer ID is: {:?}", resp.get_id().unwrap());
+
+            // create outfile
+            let file = portal.create_file("/tmp/test")?;
+
+            // Receive until connection is done
+            let mut len = 1;
+            while len != 0 {
+                received_data.clear();
+                len = networking::recv_generic(&mut client, &mut received_data)?;
+                file.write(&received_data)?;
+                total += len;
+            }
+
         }
+        false => {
 
+            let pubkey = resp.get_pubkey().unwrap();
+            println!("[+] Received client public key: {:?}", pubkey);
 
-    } else {
+            // open file read-only for sending
+            let file = portal.load_file(file_path.unwrap())?;
 
-      pubkey = resp.get_pubkey().unwrap();
-      file = portal.load_file(file_path.unwrap())?;
-      println!("[+] Received client public key: {:?}", pubkey);
+            // This will be empty for files created with create_file()
+            let chunks = portal.get_chunks(&file,8192);
 
-      // This will be empty for files created with create_file()
-      let mut chunks = portal.get_chunks(&file,1024);
-
-      for data in chunks.into_iter() {
-        println!("[+] sent {:?}", data.len());
-        client.write_all(&data)?;
-      }
+            for data in chunks.into_iter() {
+                client.write_all(&data)?;
+                total += data.len();
+            }
+        }
     }
     
 
-    
+    println!("[+] transferred {:?}", total);
 
     Ok(())
 }
