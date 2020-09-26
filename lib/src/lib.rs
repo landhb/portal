@@ -40,7 +40,7 @@ pub struct Portal{
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum Direction {
     Sender,
-    Reciever,
+    Receiver,
 }
 
 
@@ -264,7 +264,7 @@ mod tests {
     fn key_derivation() {
 
         // receiver
-        let dir = Some(Direction::Reciever);
+        let dir = Some(Direction::Receiver);
         let pass ="test".to_string();
         let (mut receiver,receiver_msg) = Portal::init(dir,pass,None);
 

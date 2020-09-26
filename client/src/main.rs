@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                   .takes_value(true)
                                   .required(true)
                                   .help("file to transfer"))
-                              .arg(Arg::with_name("id")
+                              .arg(Arg::with_name("password")
                                   .short("i")
                                   .takes_value(true)
                                   .required(true)
@@ -46,24 +46,33 @@ fn main() -> Result<(), Box<dyn Error>> {
     match matches.subcommand() {
         ("send", Some(args)) =>  { 
 
-            let req = Portal::init(
+            // TODO: generate unique string here
+            let pass = String::from("testpasswd");
+            let file = args.value_of("filename").unwrap();
+
+            let (req,msg) = Portal::init(
                 Some(portal::Direction::Sender),
-                Some(args.value_of("id").unwrap().to_string()),
-                None,
+                pass,
+                Some(file.to_string()),
             );
 
-            transfer(req,args.value_of("filename"),addr, false)?;
+            transfer(req,msg, args.value_of("filename"),addr, false)?;
             
         },
         ("recv", Some(args)) =>  { 
 
-            let req = Portal::init(
-                Some(portal::Direction::Reciever),
-                None,
-                Some(String::from("Test")),
+
+            let pass = rpassword::read_password_from_tty(Some("Password: ")).unwrap();
+
+
+            let (req,msg) = Portal::init(
+                Some(portal::Direction::Receiver),
+                pass,
+                None, // receiver will get the filename from the sender
             );
 
-            transfer(req,args.value_of("filename"),addr, true)?;
+
+            transfer(req,msg, args.value_of("filename"),addr, true)?;
 
         },
         _ => {println!("Please provide a valid subcommand. Run portal -h for more information.");},
@@ -72,30 +81,50 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn transfer(portal: Portal, file_path: Option<&str>, addr: std::net::SocketAddr, is_reciever: bool) -> Result<(), Box<dyn Error>>  {
+fn transfer(mut portal: Portal, msg: Vec<u8>, file_path: Option<&str>, addr: std::net::SocketAddr, is_reciever: bool) -> Result<(), Box<dyn Error>>  {
     
-    // Setup the client socket.
+
     let mut client = TcpStream::connect(addr)?;
     println!("[+] Connected {:?}", client);
 
+
+    /*
+     * Step 1: Portal Request
+     */
     let req = portal.serialize()?;
     client.write_all(&req)?;
-    println!("[+] Sent {:?}", req);
+    println!("[+] Sent {:?}", portal);
 
+    /*
+     * Step 2: Portal Response/Acknowledgement of peering
+     */
     let mut received_data = Vec::with_capacity(8192);
     networking::recv_generic(&mut client, &mut received_data)?;    
-
-    // attempt to deserialize the portal response
     let resp = Portal::parse(&received_data.to_vec())?;
     println!("[+] Recieved {:?}", resp);
-        
-    let mut total = 0;
 
+    /*
+     * Step 3: PAKE2 msg exchange
+     */
+    client.write_all(&msg)?;
+    received_data.clear();
+    networking::recv_generic(&mut client, &mut received_data)?;
+
+    /*
+     * Step 4: Key derivation
+     */
+    portal.confirm_peer(&received_data).unwrap();
+
+        
+    /*
+     * Step 5: Begin file transfer
+     */
+    let mut total = 0;
     match is_reciever {
 
         true => {
 
-            println!("[+] Your transfer ID is: {:?}", resp.get_id().unwrap());
+            println!("[+] Your transfer ID is: {:?}", resp.get_id());
 
             // create outfile
             let file = portal.create_file("/tmp/test")?;
@@ -112,8 +141,8 @@ fn transfer(portal: Portal, file_path: Option<&str>, addr: std::net::SocketAddr,
         }
         false => {
 
-            let pubkey = resp.get_pubkey().unwrap();
-            println!("[+] Received client public key: {:?}", pubkey);
+            let id = resp.get_id();
+            println!("[+] Sending file to: {:?}", id);
 
             // open file read-only for sending
             let file = portal.load_file(file_path.unwrap())?;

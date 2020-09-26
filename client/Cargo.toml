@@ -6,9 +6,8 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-
 [dependencies]
 portal-lib = { path = "../lib" }
-#mio = {version = "0.7", features = ["os-poll", "tcp"]}
 anyhow = "1.0.32"
 clap = "2.33.3"
+rpassword = "5.0.0"
