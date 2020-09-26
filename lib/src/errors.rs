@@ -7,6 +7,10 @@ pub enum PortalError {
     Mutablility,
     #[error("Bad registration")]
     BadRegistration,
+    #[error("No state initialized")]
+    BadState,
+    #[error("KeyDerivationFailed")]
+    BadMsg,
     #[error("Interrupted")]
     Interrupted,
     #[error("WouldBlock")]

@@ -4,8 +4,10 @@ use std::fs::File;
 use memmap::Mmap;
 use std::fs::OpenOptions;
 use std::cell::RefCell;
-pub mod errors;
+use spake2::{Ed25519Group, Identity, Password, SPAKE2};
+use sha2::{Sha256, Digest};
 
+pub mod errors;
 use errors::PortalError;
 
 
@@ -13,11 +15,26 @@ use errors::PortalError;
  * The primary interface into the library
  */
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct Portal {
+pub struct Portal{
+
+    // Information to correlate
+    // connections on the relay
+    id: String,
     direction: Option<Direction>,
-    id: Option<String>,
-    pubkey: Option<String>,
+
+    // Metadata to be exchanged
+    // between peers
+    filename: Option<String>,
+
+    // Never serialized or sent to the relay
+    #[serde(skip)]
+    state: Option<SPAKE2<Ed25519Group>>,
+
+    // Never serialized or sent to the relay
+    #[serde(skip)]
+    key: Option<Vec<u8>>,
 }
+
 
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -26,16 +43,21 @@ pub enum Direction {
     Reciever,
 }
 
+
+/**
+ * A file mapping, either an immutable mmap 
+ */
+pub enum PortalFile {
+    Immutable(PortalFileImmutable),
+    Mutable(PortalFileMutable),
+}
+
 pub struct PortalFileImmutable {
     mmap: Mmap,
 }
 
-pub struct PortalFileMut {
+pub struct PortalFileMutable {
     file: RefCell<File>,
-    //mmap: MmapMut,
-    /*len: usize,
-    used: usize,
-    offset: usize,*/
 }
 
 
@@ -76,10 +98,7 @@ where T:Copy
     }
 } 
 
-pub enum PortalFile {
-    Immutable(PortalFileImmutable),
-    Mutable(PortalFileMut),
-}
+
 
 impl PortalFile {
 
@@ -100,35 +119,22 @@ impl PortalFile {
 
 
 
-impl PortalFileMut {
+impl PortalFileMutable {
 
     fn write(&self, data: &[u8]) -> Result<usize> {
         use std::io::Write;
-
-        /*let remaining = self.len - self.used;
-        if data.len() > remaining {
-            let diff = data.len() - remaining;
-            //self.file.set_len(self.len + diff)?;
-            self.len += diff;
-        } */
-
         self.file.borrow_mut().write_all(data)?;
-        //(&mut self.mmap[self.offset..]).write_all(data)?;
-        //self.offset += data.len();
         Ok(data.len())
     } 
 
 }
 
 
-impl Drop for PortalFileMut {
+impl Drop for PortalFileMutable {
 
     // attempt to flush to disk
     fn drop(&mut self) {
-        match self.file.get_mut().sync_all() {
-            Ok(_) => {},
-            Err(_) => {},
-        }
+        let _ = self.file.get_mut().sync_all();
     }
 
 } 
@@ -138,12 +144,29 @@ impl Portal {
     /**
      * Initialize 
      */
-    pub fn init(direction: Option<Direction>, id: Option<String>, pubkey: Option<String>) -> Portal {
-        Portal {
+    pub fn init(direction: Option<Direction>, 
+                password: String,
+                filename: Option<String>) -> (Portal,Vec<u8>) {
+
+        
+        // use password to compute ID string
+        let mut hasher = Sha256::new();
+        hasher.update(&password);
+        let id_bytes = hasher.finalize();
+        let id = hex::encode(&id_bytes);
+
+        let (s1, outbound_msg) = SPAKE2::<Ed25519Group>::start_symmetric(
+           &Password::new(&password.as_bytes()),
+           &Identity::new(&id_bytes));
+       
+
+        return (Portal {
             direction: direction,
             id: id,
-            pubkey: pubkey,
-        }
+            filename: filename,
+            state: Some(s1),
+            key: None,
+        }, outbound_msg);
     }
 
     /**
@@ -157,12 +180,8 @@ impl Portal {
         Ok(bincode::serialize(&self)?)
     }
 
-    pub fn get_id(&self) -> Option<String> {
-        self.id.clone()
-    }
-
-    pub fn get_pubkey(&self) -> Option<String> {
-        self.pubkey.clone()
+    pub fn get_id(&self) -> &String {
+        &self.id
     }
 
     pub fn get_direction(&self) -> Option<Direction> {
@@ -170,15 +189,11 @@ impl Portal {
     }
 
     pub fn set_id(&mut self, id: String) {
-        self.id = Some(id);
+        self.id = id;
     }
 
     pub fn set_direction(&mut self, direction: Option<Direction>) {
         self.direction = direction;
-    }
-
-    pub fn set_pubkey(&mut self, pubkey: Option<String>){
-        self.pubkey = pubkey;
     }
 
     /*
@@ -189,6 +204,7 @@ impl Portal {
         let mmap = unsafe { Mmap::map(&file)?  };
         Ok(PortalFile::Immutable(PortalFileImmutable{mmap: mmap}))
     }
+
 
     /*
      * mmap's a file into memory for writing
@@ -201,14 +217,7 @@ impl Portal {
                        .create(true)
                        .open(&f)?;
 
-        //let mmap = unsafe { Mmap::map(&file)?  };
-        //let writer = mmap.make_mut()?;
-        Ok(PortalFile::Mutable(PortalFileMut{
-            file: RefCell::new(file)}))
-            //mmap: writer, 
-            //len: 0,
-            //used: 0,
-            //offset: 0}))
+        Ok(PortalFile::Mutable(PortalFileMutable{file: RefCell::new(file)}))
     }
 
     /**
@@ -229,6 +238,22 @@ impl Portal {
         }
     }
 
+
+    pub fn confirm_peer(&mut self, msg_data: &[u8]) -> Result<()> {
+
+        // after calling finish() the SPAKE2 struct will be consumed
+        // so we must replace the value stored in self.state
+        let state = std::mem::replace(&mut self.state, None);
+
+        let state = state.ok_or_else(|| PortalError::BadState)?;
+
+        self.key = match state.finish(msg_data) {
+            Ok(res) => Some(res),
+            Err(_) => {return Err(PortalError::BadMsg.into());}
+        };
+        Ok(())
+    }
+
 }
 
 #[cfg(test)]
@@ -236,10 +261,31 @@ mod tests {
     use super::{Portal,Direction};
 
     #[test]
+    fn key_derivation() {
+
+        // receiver
+        let dir = Some(Direction::Reciever);
+        let pass ="test".to_string();
+        let (mut receiver,receiver_msg) = Portal::init(dir,pass,None);
+
+        // sender
+        let dir = Some(Direction::Sender);
+        let pass ="test".to_string();
+        let (mut sender,sender_msg) = Portal::init(dir,pass,None);
+
+
+        receiver.confirm_peer(&sender_msg).unwrap();
+        sender.confirm_peer(&receiver_msg).unwrap();
+
+        assert!(receiver.key == sender.key);
+    }
+
+
+    #[test]
     fn portalfile_iterator() {
         let dir = Some(Direction::Sender);
-        let key = Some("test".to_string());
-        let portal = Portal::init(dir,None,key);
+        let pass ="test".to_string();
+        let (portal,_msg) = Portal::init(dir,pass,None);
 
         // TODO change test file
         let file = portal.load_file("/etc/passwd").unwrap();
@@ -262,12 +308,12 @@ mod tests {
     #[test]
     fn portal_createfile() {
         let dir = Some(Direction::Sender);
-        let key = Some("test".to_string());
-        let portal = Portal::init(dir,None,key);
+        let pass = "test".to_string();
+        let (portal,_msg) = Portal::init(dir,pass, None);
 
         // TODO change test file
         let file_src = portal.load_file("/etc/passwd").unwrap();
-        let mut file_dst = portal.create_file("/tmp/passwd").unwrap();
+        let file_dst = portal.create_file("/tmp/passwd").unwrap();
 
         let chunk_size = 1024;
         let chunks = portal.get_chunks(&file_src,chunk_size);
