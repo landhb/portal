@@ -1,6 +1,6 @@
 extern crate portal_lib as portal;
 
-use mio::Poll;
+use mio::{Poll,Token, Ready, PollOpt};
 use crate::Endpoint;
 use mio::event::Event;
 use anyhow::Result;
@@ -18,6 +18,7 @@ use std::os::unix::io::AsRawFd;
  *  Sender socket -> Pipe -> Reciever Socket
  */
 pub fn handle_client_event (
+    token: Token,
     registry: &Poll,
     endpoint: &mut Endpoint,
     event: &Event) -> Result<bool> {
@@ -31,7 +32,7 @@ pub fn handle_client_event (
             None => {
                 // end this connection if there is no peer pipe
                 //registry.deregister(&mut endpoint.stream)?;
-                return Ok(false);
+                return Ok(true);
             }
         };
 
@@ -50,6 +51,10 @@ pub fn handle_client_event (
         if read <= 0 && (errno != Some(libc::EWOULDBLOCK) || errno != Some(libc::EAGAIN)) {
             registry.deregister(&mut endpoint.stream)?;
             return Ok(true);
+        }
+
+        if read <=0 && (errno == Some(libc::EWOULDBLOCK) || errno == Some(libc::EAGAIN)) {
+            registry.reregister(&mut endpoint.stream,token,Ready::readable(),PollOpt::level())?;
         }
 
         println!("read {} bytes from pipe", read);

@@ -39,9 +39,9 @@ pub fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> 
     Ok(received_data.len())
 }
 
-pub fn send_generic(connection: &mut TcpStream, data: Vec<u8>) -> Result<()> {
+pub fn send_generic(connection: &mut TcpStream, data: &Vec<u8>) -> Result<()> {
 
-    match connection.write(&data) {
+    match connection.write(data) {
         // We want to write the entire `DATA` buffer in a single go. If we
         // write less we'll return a short write error (same as
         // `io::Write::write_all` does).
