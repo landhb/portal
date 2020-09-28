@@ -116,9 +116,7 @@ impl<'a> Iterator for PortalChunks<'a,u8>
 
         
         // TODO: encrypt in place instead of returning new Vec
-        println!("before size: {:?}",beg.len());
         let data = cipher.encrypt(nonce,beg).expect("encryption failure!");
-        println!("after size: {:?}",data.len());
         let chunk = PortalChunk {
             nonce: nonce.as_slice().to_owned(),
             data: data,
