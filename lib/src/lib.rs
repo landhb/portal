@@ -4,7 +4,7 @@ use std::fs::File;
 use memmap::Mmap;
 use std::fs::OpenOptions;
 use std::cell::RefCell;
-use spake2::{Ed25519Group, Identity, Password, SPAKE2};
+use spake2::{Ed25519Group, Identity, Password, SPAKE2,Group};
 use sha2::{Sha256, Digest};
 
 pub mod errors;
@@ -170,10 +170,32 @@ impl Portal {
     }
 
     /**
-     * Construct from data 
+     * Construct from a stream reader, consuming the bytes
+     */
+    pub fn read_response_from<R>(reader: R) -> Result<Portal> 
+    where
+        R: std::io::Read {
+        Ok(bincode::deserialize_from::<R,Portal>(reader)?)
+    }
+
+    /**
+     * Receive the bytes necessary for a confirmation message
+     * from a stream reader, consuming the bytes
+     */
+    pub fn read_confirmation_from<R>(mut reader: R) -> Result<[u8;33]> 
+    where
+       R: std::io::Read {
+        assert_eq!(33,Portal::get_peer_msg_size());
+        let mut res = [0u8;33];
+        reader.read(&mut res)?;
+        Ok(res)
+    }
+
+    /**
+     * Attempt to deserialize from a vector
      */
     pub fn parse(data: &Vec<u8>) -> Result<Portal> {
-        Ok(bincode::deserialize(data)?)
+        Ok(bincode::deserialize(&data)?)
     }
 
     pub fn serialize(&self) -> Result<Vec<u8>> {
@@ -252,6 +274,13 @@ impl Portal {
             Err(_) => {return Err(PortalError::BadMsg.into());}
         };
         Ok(())
+    }
+
+    fn get_peer_msg_size() -> usize {
+        // The exchanged message is the CompressedEdwardsY + 1 byte for the SPAKE direction
+        let edwards_point = <spake2::Ed25519Group as Group>::Element::default();
+        let compressed = edwards_point.compress();
+        std::mem::size_of_val(&compressed)+1
     }
 
 }

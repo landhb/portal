@@ -98,28 +98,27 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, file_path: Option<&str>, addr: std
     /*
      * Step 2: Portal Response/Acknowledgement of peering
      */
-    let mut received_data = Vec::with_capacity(8192);
-    networking::recv_generic(&mut client, &mut received_data)?;    
-    let resp = Portal::parse(&received_data.to_vec())?;
+    let resp = Portal::read_response_from(&mut client)?;
     println!("[+] Recieved {:?}", resp);
 
     /*
      * Step 3: PAKE2 msg exchange
      */
     client.write_all(&msg)?;
-    received_data.clear();
-    networking::recv_generic(&mut client, &mut received_data)?;
+    let confirm_msg = Portal::read_confirmation_from(&mut client)?;
+
 
     /*
      * Step 4: Key derivation
      */
-    portal.confirm_peer(&received_data).unwrap();
+    portal.confirm_peer(&confirm_msg).unwrap();
 
         
     /*
      * Step 5: Begin file transfer
      */
     let mut total = 0;
+    let mut received_data = Vec::with_capacity(8192);
     match is_reciever {
 
         true => {

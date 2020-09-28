@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::cell::{RefCell};
 use std::rc::Rc;
-
+use std::io::Write;
 // use another way to generate the ID
 // ideally more human readable/shareable
 // + easy to type
@@ -94,7 +94,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     println!("[+] Got connection from {:?}", addr);
 
-                    let mut received_data = Vec::with_capacity(4096);
+                    
+                    let mut received_data = Vec::with_capacity(1024);
                     while received_data.len() == 0 {
                         match networking::recv_generic(&mut connection,&mut received_data) {
                             Ok(_) => {},
@@ -107,12 +108,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     println!("{:?}", received_data.len());
 
                     // attempt to recieve a portal request
-                    let req = match Portal::parse(&received_data) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            println!("{:?}", e);
-                            continue;
-                        },
+                    let req: Portal = match Portal::parse(&received_data) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                println!("{:?}", e);
+                                continue;
+                            },
                     };
 
                     println!("req: {:?}", req);
@@ -121,33 +122,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                         Some(portal::Direction::Receiver) => {
 
-
-                            // create the pipe for this transfer
-                            let (reader, writer) = pipe().unwrap();
-                            let (reader2, writer2) = pipe().unwrap();
-
-                            /* lookup reciever's ID
-                            let peer_token = match lookup_token.get(&req.get_id()) {
-                                Some(p) => p,
-                                None => {
-                                    connection.shutdown(std::net::Shutdown::Both)?;
-                                    continue;
-                                },
-                            };
-
-
-                            let mut ref_endpoints = endpoints.borrow_mut();
-                            
-                            let mut peer = match ref_endpoints.get_mut(&peer_token) {
-                                Some(p) => p,
-                                None => {
-                                    lookup_token.remove(&req.get_id().unwrap());
-                                    connection.shutdown(std::net::Shutdown::Both)?;
-                                    continue;
-                                },
-                            }; */
-
-                            // Lookup peer token
+                            // Lookup Sender token
                             let id = req.get_id();
                             let ref_endpoints = endpoints.borrow();
                             let search = ref_endpoints.iter()
@@ -157,7 +132,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 Some(t) => t.clone(),
                                 None => {continue;}
                             };
-
+                            
+                            // drop the immutable reference because we need a mutable one
                             drop(ref_endpoints);
 
                             let mut ref_endpoints = endpoints.borrow_mut();
@@ -173,37 +149,29 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 continue;
                             }
                             
-
-                            // send the peer's public key to the sender
-                            //req.set_pubkey(Some(peer.pubkey.as_ref().unwrap().clone()));
-                            let resp = req.serialize()?;
-                            match networking::send_generic(&mut connection, &resp) {
-                                Ok(_) => {},
-                                Err(e) => {
-                                    println!("error while sending resp {:?}", e);
-                                    continue;
-                                }
-                            }
-                            match networking::send_generic(&mut peer.stream, &resp) {
-                                Ok(_) => {},
-                                Err(e) => {
-                                    println!("error while sending resp {:?}", e);
-                                    continue;
-                                }
-                            }
-
                             // assign token since the peer is valid
                             let token = next(&mut unique_token);
+                            
+                            // create the pipes for this transfer
+                            let (reader, mut writer) = pipe().unwrap();
+                            let (reader2, mut writer2) = pipe().unwrap();
+                            
+                            // write the acknowledgement response to both pipe endpoints
+                            let resp = req.serialize()?;
+                            writer.write_all(&resp)?;
+                            writer2.write_all(&resp)?;
+
+                            println!("Finished writing to pipes");
 
                             // update the peer with the pipe information
                             peer.peer_writer = Some(writer);
                             peer.peer_reader = Some(reader2); //None;
                             peer.peer_token = Some(token);
-
-                            // set socket to READABLE-interest only, after we confirm the existence
-                            // of the receiver, this client will only be sending
-                            //poll.registry().register(&mut connection, token,Interest::READABLE)?;
-                            poll.register(&mut connection, token, Ready::readable(),PollOpt::level())?;
+                            
+                            // set socket to WRITABLE-interest initially to drain the pipes we just
+                            // wrote the acknowledgment messages to
+                            poll.register(&mut connection, token, Ready::writable(),PollOpt::level())?;
+                            poll.reregister(&mut peer.stream, peer_token, Ready::writable(),PollOpt::level())?;
 
                             // create this endpoint
                             let endpoint = Endpoint {

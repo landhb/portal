@@ -1,9 +1,7 @@
 use mio::net::TcpStream;
-use std::io::{self,Read,Write};
-use anyhow::{Result,Error};
+use std::io::{self,Read};
+use anyhow::Result;
 
-
-use portal::errors::PortalError;
 
 fn would_block(err: &io::Error) -> bool {
     err.kind() == io::ErrorKind::WouldBlock
@@ -39,27 +37,3 @@ pub fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> 
     Ok(received_data.len())
 }
 
-pub fn send_generic(connection: &mut TcpStream, data: &Vec<u8>) -> Result<()> {
-
-    match connection.write(data) {
-        // We want to write the entire `DATA` buffer in a single go. If we
-        // write less we'll return a short write error (same as
-        // `io::Write::write_all` does).
-        Ok(n) if n < data.len() => return Err(Error::new(PortalError::BadRegistration)),
-        Ok(_) => {
-            Ok(())
-        }
-        // Would block "errors" are the OS's way of saying that the
-        // connection is not actually ready to perform this I/O operation.
-        Err(ref err) if would_block(err) => {
-            return Err(PortalError::WouldBlock.into())
-        }
-        // Got interrupted (how rude!), we'll try again.
-        Err(ref err) if interrupted(err) => {
-            //return handle_connection_event(registry, connection, event)
-            return Err(PortalError::Interrupted.into())
-        }
-        // Other errors we'll consider fatal.
-        Err(err) => return Err(err.into()),
-    }
-}
