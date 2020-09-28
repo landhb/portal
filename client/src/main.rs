@@ -130,11 +130,11 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, file_path: Option<&str>, addr: std
 
             // Receive until connection is done
             let mut len = 1;
-            while len != 0 {
+            while let Ok(len) = file.process_next_chunk(&client) {
                 //received_data.clear();
                 //len = networking::recv_generic(&mut client, &mut received_data)?;
                 //file.write(&received_data)?;
-                len = file.process_next_chunk(&client)?;
+                //len = file.process_next_chunk(&client)?;
                 total += len;
             }
 

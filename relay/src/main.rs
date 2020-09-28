@@ -255,7 +255,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let id = client.id.clone();
 
                     // perform the action
-                    let done = handlers::handle_client_event(token,&poll, client, &event)?;
+                    let (done,trx) = handlers::handle_client_event(token,&poll, client, &event)?;
 
                     println!("handler finished {:?}", done);
 
@@ -285,7 +285,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     
                     // If this connection is finished, or our peer has disconnected
                     // shutdown the connection
-                    if done || !endpoints.borrow().contains_key(&peer_token) {
+                    if done || (trx <= 0 && !endpoints.borrow().contains_key(&peer_token)) {
                         println!("Removing endpoint for {:?}", token);
                         lookup_token.remove(&id);
                         if let Some(mut client) = endpoints.borrow_mut().remove(&token) {
