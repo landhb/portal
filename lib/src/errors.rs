@@ -3,12 +3,14 @@ use std::io;
 
 #[derive(Error, Debug)]
 pub enum PortalError {
-    #[error("Must be immutable")]
-    Mutablility,
+    #[error("Incorrect Mutability")]
+    Mutability,
     #[error("Bad registration")]
     BadRegistration,
     #[error("No state initialized")]
     BadState,
+    #[error("No peer confirmed")]
+    NoPeer,
     #[error("KeyDerivationFailed")]
     BadMsg,
     #[error("Interrupted")]
