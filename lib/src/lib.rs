@@ -71,7 +71,11 @@ pub struct PortalFileMutable {
     state: PortalEncryptState,
 }
 
-
+#[derive(Serialize, Deserialize, PartialEq)]
+struct PortalChunk {
+    nonce: Vec<u8>,
+    data: Vec<u8>,
+}
 
 pub struct PortalChunks<'a, T: 'a> {
     v: &'a [T],
@@ -115,7 +119,14 @@ impl<'a> Iterator for PortalChunks<'a,u8>
         println!("before size: {:?}",beg.len());
         let data = cipher.encrypt(nonce,beg).expect("encryption failure!");
         println!("after size: {:?}",data.len());
-        Some(data)
+        let chunk = PortalChunk {
+            nonce: nonce.as_slice().to_owned(),
+            data: data,
+        };
+        match bincode::serialize(&chunk) {
+            Ok(v) => Some(v),
+            Err(_) => None,
+        }
     }
 } 
 
@@ -130,10 +141,19 @@ impl PortalFile {
         }
     }
 
-    pub fn write(&self, data: &[u8]) -> Result<usize> {
+    /*pub fn write(&self, data: &[u8]) -> Result<usize> {
         match self {
             PortalFile::Immutable(_inner) => Err(PortalError::Mutability.into()),
             PortalFile::Mutable(inner) => {return inner.write(data);},
+        }
+    } */
+
+    pub fn process_next_chunk<R>(&self,reader: R) -> Result<usize> 
+    where
+        R: std::io::Read {
+        match self {
+            PortalFile::Immutable(_inner) => Err(PortalError::Mutability.into()),
+            PortalFile::Mutable(inner) => {return inner.process_next_chunk(reader);},
         }
     }
 }
@@ -142,13 +162,20 @@ impl PortalFile {
 
 impl PortalFileMutable {
 
-    fn write(&self, data: &[u8]) -> Result<usize> {
-        use std::io::Write;
 
-        let nonce = Nonce::from_slice(b"unique nonce");
-        //let dec_data = self.state.cipher.decrypt(nonce,data).expect("decryption failure!");
-        self.file.borrow_mut().write_all(&data)?;
-        Ok(data.len())
+    fn process_next_chunk<R>(&self,reader: R) -> Result<usize>
+    where 
+        R: std::io::Read {
+        let chunk: PortalChunk = bincode::deserialize_from::<R,PortalChunk>(reader)?;
+        Ok(self.write(chunk)?)
+    }
+
+    fn write(&self, chunk: PortalChunk) -> Result<usize> {
+        use std::io::Write;
+        let nonce = Nonce::from_slice(&chunk.nonce[..]);
+        let dec_data = self.state.cipher.decrypt(nonce,&chunk.data[..]).expect("decryption failure!");
+        self.file.borrow_mut().write_all(&dec_data)?;
+        Ok(dec_data.len())
     } 
 
 }
