@@ -49,11 +49,11 @@ pub fn handle_client_event (
         // check if connection is closed
         let errno = std::io::Error::last_os_error().raw_os_error();
         if read <= 0 && (errno != Some(libc::EWOULDBLOCK) || errno != Some(libc::EAGAIN)) {
-            registry.deregister(&mut endpoint.stream)?;
+            //registry.deregister(&mut endpoint.stream)?;
             return Ok(true);
         }
 
-        if read <=0 && (errno == Some(libc::EWOULDBLOCK) || errno == Some(libc::EAGAIN)) {
+        if read <= 0 && (errno == Some(libc::EWOULDBLOCK) || errno == Some(libc::EAGAIN)) {
             registry.reregister(&mut endpoint.stream,token,Ready::readable(),PollOpt::level())?;
         }
 
@@ -84,8 +84,12 @@ pub fn handle_client_event (
 
         // check if connection is closed
         let errno = std::io::Error::last_os_error().raw_os_error();
-        if sent <= 0 && (errno != Some(libc::EWOULDBLOCK) || errno != Some(libc::EAGAIN)) {
-            registry.deregister(&mut endpoint.stream)?;
+        if sent < 0 && (errno != Some(libc::EWOULDBLOCK) || errno != Some(libc::EAGAIN)) {
+            //registry.deregister(&mut endpoint.stream)?;
+            return Ok(true);
+        }
+
+        if sent == 0 {
             return Ok(true);
         }
 

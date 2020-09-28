@@ -259,22 +259,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     println!("handler finished {:?}", done);
 
-                    // only the reciever should remove the lookup token on close
-                    if done {
-                        println!("Removing endpoint for {:?}", token);
-                        lookup_token.remove(&id);
-                        ref_endpoints.remove(&token);
-                        continue;
-                    }
-
                     // if we read in new data from the sender
                     // we are now interested in WRITEABLE events for our reciever 
                     if event.readiness().is_readable() {
-
-                        /*let token_val = match client.peer_token.as_ref() {
-                            Some(val) => val.0,
-                            None => {continue;},
-                        }; */
 
                         // get the corresponding peer
                         let peer = match ref_endpoints.get_mut(&peer_token) {
@@ -293,7 +280,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
 
                     } 
+
+                    drop(ref_endpoints);
                     
+                    // If this connection is finished, or our peer has disconnected
+                    // shutdown the connection
+                    if done || !endpoints.borrow().contains_key(&peer_token) {
+                        println!("Removing endpoint for {:?}", token);
+                        lookup_token.remove(&id);
+                        if let Some(mut client) = endpoints.borrow_mut().remove(&token) {
+                            poll.deregister(&mut client.stream)?;
+                            client.stream.shutdown(std::net::Shutdown::Both)?;
+                        }
+                        continue;
+                    }
                 }
             }
         }
