@@ -8,16 +8,13 @@ use std::error::Error;
 use std::cell::{RefCell};
 use std::rc::Rc;
 use std::io::Write;
-// use another way to generate the ID
-// ideally more human readable/shareable
-// + easy to type
-//use std::sync::Mutex;
 use mio::net::{TcpListener, TcpStream};
-use mio::{Events, Ready, Poll, Token, PollOpt}; //Interest, Poll, Token};
+use mio::{Events, Ready, Poll, Token, PollOpt}; 
 use os_pipe::{pipe,PipeReader,PipeWriter};
 
 mod handlers;
 mod networking;
+mod logging;
 
 // Some tokens to allow us to identify which event is for which socket.
 const SERVER: Token = Token(0);
@@ -27,6 +24,7 @@ pub struct Endpoint {
     id: String,
     dir: portal::Direction,
     stream: TcpStream,
+    writable: bool,
     peer_writer: Option<PipeWriter>,
     peer_reader: Option<PipeReader>,
     peer_token: Option<Token>,
@@ -57,7 +55,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     //poll.registry()
     poll.register(&mut server, SERVER, Ready::readable(), PollOpt::level())?;
 
-
     let mut unique_token = Token(SERVER.0+1);
 
     // Use to reference existing endpoints and their polling tokens
@@ -81,7 +78,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     // If this is an event for the server, it means a connection
                     // is ready to be accepted.
-                    let (mut connection, addr) = match server.accept() {
+                    let (mut connection, _addr) = match server.accept() {
                         Ok((s, addr)) => (s,addr),
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             // go back to polling for connections
@@ -92,7 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     };
 
-                    println!("[+] Got connection from {:?}", addr);
+                    log!("[+] Got connection from {:?}", _addr);
 
                     
                     let mut received_data = Vec::with_capacity(1024);
@@ -105,18 +102,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
 
-                    println!("{:?}", received_data.len());
+                    log!("{:?}", received_data.len());
 
                     // attempt to recieve a portal request
                     let req: Portal = match Portal::parse(&received_data) {
                             Ok(r) => r,
-                            Err(e) => {
-                                println!("{:?}", e);
+                            Err(_e) => {
+                                log!("{:?}", _e);
                                 continue;
                             },
                     };
 
-                    println!("req: {:?}", req);
+                    log!("req: {:?}", req);
 
                     match req.get_direction() {
 
@@ -144,7 +141,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 
                             // if the peer already has a connection, disregard this one
-                            if !peer.peer_reader.is_none() {
+                            if !peer.peer_token.is_none() {
                                 connection.shutdown(std::net::Shutdown::Both)?;
                                 continue;
                             }
@@ -153,19 +150,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                             let token = next(&mut unique_token);
                             
                             // create the pipes for this transfer
-                            let (reader, mut writer) = pipe().unwrap();
                             let (reader2, mut writer2) = pipe().unwrap();
                             
                             // write the acknowledgement response to both pipe endpoints
                             let resp = req.serialize()?;
-                            writer.write_all(&resp)?;
                             writer2.write_all(&resp)?;
 
-                            println!("Finished writing to pipes");
+                            log!("Finished writing to pipes");
 
                             // update the peer with the pipe information
-                            peer.peer_writer = Some(writer);
-                            peer.peer_reader = Some(reader2); //None;
+                            let old_reader = std::mem::replace(&mut peer.peer_reader, Some(reader2));
                             peer.peer_token = Some(token);
                             
                             // set socket to WRITABLE-interest initially to drain the pipes we just
@@ -178,13 +172,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 id: id.to_string(),
                                 dir: req.get_direction().unwrap(),
                                 stream: connection,
-                                peer_reader: Some(reader),
+                                writable: true,
+                                peer_reader: old_reader,
                                 peer_writer: Some(writer2), //None,
                                 peer_token: Some(peer_token),
                                 
                             };
 
-                            println!("Added sender {:?}", endpoints);
+                            log!("Added sender {:?}", endpoints);
 
                             ref_endpoints.entry(token).or_insert(endpoint);
                             lookup_token.entry(id.to_string()).or_insert(token);
@@ -193,33 +188,27 @@ fn main() -> Result<(), Box<dyn Error>> {
                         Some(portal::Direction::Sender) => {
 
 
-                            /* send confirmation of registration and unique ID
-                            let resp = req.serialize()?;
-                            match networking::send_generic(&mut connection, resp) {
-                                Ok(_) => {},
-                                Err(e) => {
-                                    println!("error while sending resp {:?}", e);
-                                    continue;
-                                }
-                            }
-
-                            println!("[+] Sent response {:?}", req);*/
-
                             // We need to register for READABLE events to detect a closed connection
                             let token = next(&mut unique_token);
                             //poll.registry().register(&mut connection, token,Interest::READABLE)?;
                             poll.register(&mut connection, token, Ready::readable(),PollOpt::level())?;
                             
+                            let (reader, mut writer) = pipe().unwrap();
+
+                            let resp = req.serialize()?;
+                            writer.write_all(&resp)?;
+
                             let endpoint = Endpoint {
                                 id: req.get_id().to_string(),
                                 dir: req.get_direction().unwrap(),
                                 stream: connection,
-                                peer_writer: None,
-                                peer_reader: None,
+                                writable: true,
+                                peer_writer: Some(writer),
+                                peer_reader: Some(reader),
                                 peer_token: None,
                             };
 
-                            println!("{:?}", endpoint);
+                            log!("{:?}", endpoint);
                             
                             endpoints.borrow_mut().entry(token).or_insert(endpoint);
 
@@ -232,7 +221,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 token => {
                     
-
+                    
                     let mut ref_endpoints = endpoints.borrow_mut();
 
                     // get the client that will be performing the read/write
@@ -249,7 +238,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         None => {continue;},
                     };
 
-                    println!("event {:?} on token {:?}", event, token);
+                    log!("event {:?} on token {:?}", event, token);
 
                     // save the session id
                     let id = client.id.clone();
@@ -257,43 +246,42 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // perform the action
                     let (done,trx) = handlers::handle_client_event(token,&poll, client, &event)?;
 
-                    println!("handler finished {:?}", done);
+                    log!("handler finished {:?}", done); 
 
-                    // if we read in new data from the sender
-                    // we are now interested in WRITEABLE events for our reciever 
-                    if event.readiness().is_readable() {
+                    // get the corresponding peer
+                    if let Some(peer) = ref_endpoints.get_mut(&peer_token) {
+                       
+                    
+                        // if we read in new data and our peer isn't polling for  
+                        // WRITABLE events, we must change that
+                        if peer.writable == false && event.readiness().is_readable() {
+                           
+                            match poll.register(&mut peer.stream, peer_token,Ready::writable(),PollOpt::level()) {
+                                Ok(_) => {},
+                                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                                    poll.reregister(&mut peer.stream,peer_token,Ready::writable(),PollOpt::level())?;
+                                },
+                                Err(e) => {panic!("{:?}",e);},
+                            } 
 
-                        // get the corresponding peer
-                        let peer = match ref_endpoints.get_mut(&peer_token) {
-                            Some(p) => p,
-                            None => {
-                                continue;
-                            },
-                        };
-
-                        match poll.register(&mut peer.stream, peer_token,Ready::writable(),PollOpt::level()) {
-                            Ok(_) => {},
-                            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                                poll.reregister(&mut peer.stream,peer_token,Ready::writable(),PollOpt::level())?;
-                            },
-                            Err(e) => {panic!("{:?}",e);},
-                        }
-
-                    } 
+                        } 
+                    }
 
                     drop(ref_endpoints);
-                    
+
                     // If this connection is finished, or our peer has disconnected
                     // shutdown the connection
-                    if done || (trx <= 0 && !endpoints.borrow().contains_key(&peer_token)) {
-                        println!("Removing endpoint for {:?}", token);
+                    let peer_disconnected = !endpoints.borrow().contains_key(&peer_token);
+                    if done || (trx <= 0 && peer_disconnected) {
+                        log!("Removing endpoint for {:?}", token);
                         lookup_token.remove(&id);
                         if let Some(mut client) = endpoints.borrow_mut().remove(&token) {
                             poll.deregister(&mut client.stream)?;
                             client.stream.shutdown(std::net::Shutdown::Both)?;
                         }
-                        continue;
+                        //continue;
                     }
+
                 }
             }
         }

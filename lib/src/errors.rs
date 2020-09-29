@@ -3,6 +3,8 @@ use std::io;
 
 #[derive(Error, Debug)]
 pub enum PortalError {
+    #[error("Value doesn't exist")]
+    NoneError,
     #[error("Incorrect Mutability")]
     Mutability,
     #[error("Bad registration")]

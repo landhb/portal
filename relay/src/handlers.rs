@@ -6,6 +6,10 @@ use mio::event::Event;
 use anyhow::Result;
 use std::os::unix::io::AsRawFd;
 
+//use crate::logging::*;
+
+use crate::log;
+
 /**
  *  Handles events without utilizing a userpace intermediary buffer
  *  Utilizing splice(2)
@@ -48,15 +52,15 @@ pub fn handle_client_event (
         // check if connection is closed
         let errno = std::io::Error::last_os_error().raw_os_error();
         if trx <= 0 && (errno != Some(libc::EWOULDBLOCK) || errno != Some(libc::EAGAIN)) {
-            //registry.deregister(&mut endpoint.stream)?;
             return Ok((true,trx));
         }
 
         if trx <= 0 && (errno == Some(libc::EWOULDBLOCK) || errno == Some(libc::EAGAIN)) {
             registry.reregister(&mut endpoint.stream,token,Ready::readable(),PollOpt::level())?;
+            endpoint.writable = false;
         }
 
-        println!("sent {} bytes to Receiver", trx);
+        log!("sent {} bytes to Receiver", trx);
         
     }
 
@@ -82,7 +86,6 @@ pub fn handle_client_event (
         // check if connection is closed
         let errno = std::io::Error::last_os_error().raw_os_error();
         if trx < 0 && (errno != Some(libc::EWOULDBLOCK) || errno != Some(libc::EAGAIN)) {
-            //registry.deregister(&mut endpoint.stream)?;
             return Ok((true,trx));
         }
 
@@ -90,15 +93,9 @@ pub fn handle_client_event (
             return Ok((true,trx));
         }
 
-        println!("wrote {} bytes to pipe", trx);
+        log!("wrote {} bytes to pipe", trx);
 
     }
-
-    /* Check for closed connections before returning
-    if event.is_error() || event.is_read_closed() || event.is_write_closed() {
-        registry.deregister(&mut endpoint.stream)?;
-        return Ok(true);
-    } */
 
     Ok((false,trx))
 }

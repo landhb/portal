@@ -5,6 +5,8 @@ use memmap::Mmap;
 use std::fs::OpenOptions;
 use std::cell::RefCell;
 
+use rand::Rng;
+
 // Key Exchange
 use spake2::{Ed25519Group, Identity, Password, SPAKE2,Group};
 use sha2::{Sha256, Digest};
@@ -31,6 +33,7 @@ pub struct Portal{
     // Metadata to be exchanged
     // between peers
     filename: Option<String>,
+    filesize: u64,
 
     // Never serialized or sent to the relay
     #[serde(skip)]
@@ -85,7 +88,6 @@ pub struct PortalChunks<'a, T: 'a> {
 
 
 impl<'a> Iterator for PortalChunks<'a,u8> 
-//where T:Copy 
 {
     type Item = Vec<u8>; //&'a [u8];
 
@@ -110,11 +112,11 @@ impl<'a> Iterator for PortalChunks<'a,u8>
         // update next slice 
         self.v = end; 
 
-        // TODO: encrypt current slice
-        // TODO: random nonce
-        let nonce = Nonce::from_slice(b"unique nonce"); // 128-bits; unique per message
+        // Generate random nonce
+        let mut rng = rand::thread_rng();
+        let rbytes  = rng.gen::<[u8;12]>();
+        let nonce = Nonce::from_slice(&rbytes); // 128-bits; unique per chunk
 
-        
         // TODO: encrypt in place instead of returning new Vec
         let data = cipher.encrypt(nonce,beg).expect("encryption failure!");
         let chunk = PortalChunk {
@@ -124,10 +126,9 @@ impl<'a> Iterator for PortalChunks<'a,u8>
         match bincode::serialize(&chunk) {
             Ok(v) => Some(v),
             Err(_) => None,
-        }
+        } 
     }
 } 
-
 
 
 impl PortalFile {
@@ -173,7 +174,7 @@ impl PortalFileMutable {
         let nonce = Nonce::from_slice(&chunk.nonce[..]);
         let dec_data = self.state.cipher.decrypt(nonce,&chunk.data[..]).expect("decryption failure!");
         self.file.borrow_mut().write_all(&dec_data)?;
-        Ok(dec_data.len())
+        Ok(chunk.data.len())
     } 
 
 }
@@ -213,6 +214,7 @@ impl Portal {
             direction: direction,
             id: id,
             filename: filename,
+            filesize: 0,
             state: Some(s1),
             key: None,
         }, outbound_msg);
@@ -249,6 +251,21 @@ impl Portal {
 
     pub fn serialize(&self) -> Result<Vec<u8>> {
         Ok(bincode::serialize(&self)?)
+    }
+
+    pub fn get_file_size(&self) -> u64 {
+        self.filesize
+    }
+
+    pub fn set_file_size(&mut self, size: u64) {
+        self.filesize = size;
+    } 
+
+    pub fn get_file_name<'a>(&'a self) -> Result<&'a str> {
+        match &self.filename {
+            Some(f) => Ok(f.as_str()),
+            None => Err(PortalError::NoneError.into()),
+        }
     }
 
     pub fn get_id(&self) -> &String {

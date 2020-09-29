@@ -11,3 +11,4 @@ portal-lib = { path = "../lib" }
 anyhow = "1.0.32"
 clap = "2.33.3"
 rpassword = "5.0.0"
+indicatif = "0.15.0"

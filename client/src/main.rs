@@ -7,14 +7,15 @@ use std::error::Error;
 use clap::{Arg, App, SubCommand,AppSettings};
 use anyhow::Result;
 
-mod networking;
+use indicatif::{ProgressBar, ProgressStyle};
+
 
 fn main() -> Result<(), Box<dyn Error>> {
 
     let matches = App::new(env!("CARGO_PKG_NAME"))
                   .version(env!("CARGO_PKG_VERSION"))
                   .author(env!("CARGO_PKG_AUTHORS"))
-                  .about("Quick File Transfers")
+                  .about("Quick & Safe File Transfers")
                   .setting(AppSettings::ArgRequiredElseHelp)
                   .subcommand(SubCommand::with_name("send")
                               .about("Send a file")
@@ -50,11 +51,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             let pass = String::from("testpasswd");
             let file = args.value_of("filename").unwrap();
 
-            let (req,msg) = Portal::init(
+            let (mut req,msg) = Portal::init(
                 Some(portal::Direction::Sender),
                 pass,
                 Some(file.to_string()),
             );
+
+            let metadata = std::fs::metadata(file)?;
+            req.set_file_size(metadata.len());
 
             transfer(req,msg, args.value_of("filename"),addr, false)?;
             
@@ -70,7 +74,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 pass,
                 None, // receiver will get the filename from the sender
             );
-
 
             transfer(req,msg, args.value_of("filename"),addr, true)?;
 
@@ -118,43 +121,58 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, file_path: Option<&str>, addr: std
      * Step 5: Begin file transfer
      */
     let mut total = 0;
-    //let mut received_data = Vec::with_capacity(8192);
+    let pstyle = 
+        ProgressStyle::default_bar()
+        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+        .progress_chars("#>-");
+
     match is_reciever {
 
         true => {
 
+            let fname = resp.get_file_name()?;
             println!("[+] Your transfer ID is: {:?}", resp.get_id());
+            println!("[*] Downloading file: {:?}", fname);
+
+            let pb = ProgressBar::new(resp.get_file_size());
+            pb.set_style(pstyle);
 
             // create outfile
             let file = portal.create_file("/tmp/test")?;
 
             // Receive until connection is done
-            let mut len = 1;
             while let Ok(len) = file.process_next_chunk(&client) {
                 total += len;
+                pb.set_position(total as u64);
             }
 
+            pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
         }
         false => {
 
             let id = resp.get_id();
-            println!("[+] Sending file to: {:?}", id);
+            println!("[+] Your transfer ID is: {:?}", id);
+            println!("[+] Sending file: {:?}", file_path.unwrap());
+
+            let pb = ProgressBar::new(portal.get_file_size());
+            pb.set_style(pstyle);
 
             // open file read-only for sending
             let file = portal.load_file(file_path.unwrap())?;
 
             // This will be empty for files created with create_file()
-            let chunks = portal.get_chunks(&file,8192);
+            let csize = 16384;
+            let chunks = portal.get_chunks(&file,csize);
 
             for data in chunks.into_iter() {
                 client.write_all(&data)?;
-                total += data.len();
+                total += csize; 
+                pb.set_position(total as u64);
             }
+
+            pb.finish_with_message(format!("Sent {:?} bytes", total).as_str());
         }
     }
-    
-
-    println!("[+] transferred {:?}", total);
 
     Ok(())
 }
