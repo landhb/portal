@@ -44,23 +44,37 @@ pub fn handle_client_event (
         let dst_fd = endpoint.stream.as_raw_fd();
         let src_fd = reader.as_raw_fd();
 
-        unsafe {
-            trx = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 65535, libc::SPLICE_F_NONBLOCK);    
+        unsafe { let errno = libc::__errno_location(); *errno = 0;}
+        while let Some(errno) = std::io::Error::last_os_error().raw_os_error() {
+
+            unsafe {
+                trx = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 65535, libc::SPLICE_F_NONBLOCK);    
+            }
+
+            if trx < 0 && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
+                println!("exiting due to trx: {:?} errno {:?}", trx, errno);
+                return Ok((true,trx));
+            }
+
+            if trx < 0 && (errno == libc::EWOULDBLOCK || errno == libc::EAGAIN) {
+                break;
+            }
+
+            log!("sent {} bytes to {:?}", trx, endpoint.dir);
+
+
+            if trx == 0 {
+                break;
+            }
+
         }
 
-
-        // check if connection is closed
-        let errno = std::io::Error::last_os_error().raw_os_error();
-        if trx <= 0 && (errno != Some(libc::EWOULDBLOCK) || errno != Some(libc::EAGAIN)) {
-            return Ok((true,trx));
-        }
-
-        if trx <= 0 && (errno == Some(libc::EWOULDBLOCK) || errno == Some(libc::EAGAIN)) {
+        // If this is the Sender we wrote to, then we've just completed
+        // msg exchange and are now only interested in READABLE events from
+        // the sender
+        if endpoint.dir == portal::Direction::Sender && endpoint.writable == false {
             registry.reregister(&mut endpoint.stream,token,Ready::readable(),PollOpt::level())?;
-            endpoint.writable = false;
         }
-
-        log!("sent {} bytes to Receiver", trx);
         
     }
 
@@ -80,12 +94,14 @@ pub fn handle_client_event (
         let dst_fd = writer.as_raw_fd();
 
         unsafe {
+            let errno = libc::__errno_location(); 
+            *errno = 0;
             trx = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 65535, libc::SPLICE_F_NONBLOCK);  
         }
 
         // check if connection is closed
         let errno = std::io::Error::last_os_error().raw_os_error();
-        if trx < 0 && (errno != Some(libc::EWOULDBLOCK) || errno != Some(libc::EAGAIN)) {
+        if trx < 0 && errno != Some(libc::EWOULDBLOCK) && errno != Some(libc::EAGAIN) {
             return Ok((true,trx));
         }
 
@@ -93,7 +109,16 @@ pub fn handle_client_event (
             return Ok((true,trx));
         }
 
-        log!("wrote {} bytes to pipe", trx);
+        //log!("wrote {} bytes to pipe", trx);
+        log!("got {} bytes from {:?}", trx, endpoint.dir);
+
+        // If this is the Reciever, the we've received the last message
+        // to be read, we're now only interested in WRITABLE events,
+        // we'll use edge triggering for this endpoint since we'll want to fully
+        // drain the pipe when a writable event occurs
+        if endpoint.dir == portal::Direction::Receiver {
+            registry.reregister(&mut endpoint.stream,token,Ready::writable(),PollOpt::level())?;
+        }
 
     }
 

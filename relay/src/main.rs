@@ -164,8 +164,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                             
                             // set socket to WRITABLE-interest initially to drain the pipes we just
                             // wrote the acknowledgment messages to
-                            poll.register(&mut connection, token, Ready::writable(),PollOpt::level())?;
-                            poll.reregister(&mut peer.stream, peer_token, Ready::writable(),PollOpt::level())?;
+                            poll.register(&mut connection, token, Ready::readable()|Ready::writable(),PollOpt::level())?;
+                            poll.register(&mut peer.stream, peer_token, Ready::readable()|Ready::writable(),PollOpt::level())?;
 
                             // create this endpoint
                             let endpoint = Endpoint {
@@ -190,9 +190,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                             // We need to register for READABLE events to detect a closed connection
                             let token = next(&mut unique_token);
-                            //poll.registry().register(&mut connection, token,Interest::READABLE)?;
-                            poll.register(&mut connection, token, Ready::readable(),PollOpt::level())?;
-                            
+
                             let (reader, mut writer) = pipe().unwrap();
 
                             let resp = req.serialize()?;
@@ -248,38 +246,28 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     log!("handler finished {:?}", done); 
 
-                    // get the corresponding peer
-                    if let Some(peer) = ref_endpoints.get_mut(&peer_token) {
-                       
-                    
-                        // if we read in new data and our peer isn't polling for  
-                        // WRITABLE events, we must change that
-                        if peer.writable == false && event.readiness().is_readable() {
-                           
-                            match poll.register(&mut peer.stream, peer_token,Ready::writable(),PollOpt::level()) {
-                                Ok(_) => {},
-                                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                                    poll.reregister(&mut peer.stream,peer_token,Ready::writable(),PollOpt::level())?;
-                                },
-                                Err(e) => {panic!("{:?}",e);},
-                            } 
 
-                        } 
+                    // If this is the Reciever, and we've received the last message
+                    // to be read, we're done sending to our peer Sender after the next
+                    // writeable event
+                    if client.dir == portal::Direction::Receiver && event.readiness().is_readable() {
+                        if let Some(peer) = ref_endpoints.get_mut(&peer_token) {
+                            peer.writable = false;
+                        }
                     }
+
 
                     drop(ref_endpoints);
 
                     // If this connection is finished, or our peer has disconnected
                     // shutdown the connection
-                    let peer_disconnected = !endpoints.borrow().contains_key(&peer_token);
-                    if done || (trx <= 0 && peer_disconnected) {
+                    if done || (trx <= 0 && !endpoints.borrow().contains_key(&peer_token)) {
                         log!("Removing endpoint for {:?}", token);
                         lookup_token.remove(&id);
                         if let Some(mut client) = endpoints.borrow_mut().remove(&token) {
                             poll.deregister(&mut client.stream)?;
                             client.stream.shutdown(std::net::Shutdown::Both)?;
                         }
-                        //continue;
                     }
 
                 }

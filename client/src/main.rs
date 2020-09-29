@@ -108,6 +108,7 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, file_path: Option<&str>, addr: std
      * Step 3: PAKE2 msg exchange
      */
     client.write_all(&msg)?;
+    println!("[+] waiting for key exch...");
     let confirm_msg = Portal::read_confirmation_from(&mut client)?;
 
 
