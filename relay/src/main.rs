@@ -39,7 +39,30 @@ fn next(current: &mut Token) -> Token {
     Token(next)
 }
 
+#[cfg(not(debug_assertions))]
+fn daemonize() -> Result<(),daemonize::DaemonizeError> {
+    use daemonize::Daemonize;
+
+
+    let stdout = std::fs::File::create("/tmp/relay.out").unwrap();
+    let stderr = std::fs::File::create("/tmp/relay.err").unwrap();
+
+    let daemonize = Daemonize::new()
+        .pid_file("/tmp/relay.pid") 
+        .chown_pid_file(false)      
+        .working_directory("/tmp") 
+        .umask(0o777)   
+        .stdout(stdout)   // Redirect stdout to `/tmp/relay.out`.
+        .stderr(stderr);  // Redirect stderr to `/tmp/relay.err`.
+
+    daemonize.start()
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
+
+    // Only daemonize in release
+    #[cfg(not(debug_assertions))]
+    daemonize()?;
     
     // Create a poll instance.
     let poll = Poll::new()?;
