@@ -691,7 +691,9 @@ dependencies = [
  "directories 3.0.1",
  "dns-lookup",
  "indicatif",
+ "lazy_static",
  "portal-lib",
+ "rand 0.7.3",
  "rpassword",
  "serde",
 ]
@@ -719,7 +721,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "daemonize",
- "lazy_static",
  "libc",
  "mio 0.6.22",
  "os_pipe",
