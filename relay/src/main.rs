@@ -125,6 +125,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut received_data = Vec::with_capacity(1024);
                     while received_data.len() == 0 {
                         match networking::recv_generic(&mut connection,&mut received_data) {
+                            Ok(v) if v < 0 => {break;}, // done recieving
                             Ok(_) => {},
                             Err(_) => {
                                 break;
@@ -172,7 +173,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                             // if the peer already has a connection, disregard this one
                             if !peer.peer_token.is_none() {
-                                connection.shutdown(std::net::Shutdown::Both)?;
+                                let _ = connection.shutdown(std::net::Shutdown::Both);
                                 continue;
                             }
                             

@@ -12,7 +12,7 @@ fn interrupted(err: &io::Error) -> bool {
 }
 
 
-pub fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> Result<usize> {
+pub fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> Result<isize> {
     //let mut connection_closed = false;
     //let mut received_data = Vec::with_capacity(4096);
     loop {
@@ -22,18 +22,18 @@ pub fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> 
                 // Reading 0 bytes means the other side has closed the
                 // connection or is done writing, then so are we.
                 //connection_closed = true;
-                break;
+                return Ok(-1);
             }
             Ok(n) => received_data.extend_from_slice(&buf[..n]),
             // Would block "errors" are the OS's way of saying that the
             // connection is not actually ready to perform this I/O operation.
             Err(ref err) if would_block(err) => break,
-            Err(ref err) if interrupted(err) => break,
+            Err(ref err) if interrupted(err) => continue,
             // Other errors we'll consider fatal.
             Err(err) => return Err(err.into()),
         }
     }
 
-    Ok(received_data.len())
+    Ok(received_data.len() as isize)
 }
 
