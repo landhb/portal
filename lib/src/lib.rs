@@ -66,15 +66,16 @@ impl Portal {
      * Initialize 
      */
     pub fn init(direction: Option<Direction>, 
+                id: String,
                 password: String,
                 mut filename: Option<String>) -> (Portal,Vec<u8>) {
 
         
         // use password to compute ID string
         let mut hasher = Sha256::new();
-        hasher.update(&password);
+        hasher.update(&id);
         let id_bytes = hasher.finalize();
-        let id = hex::encode(&id_bytes);
+        let id_hash = hex::encode(&id_bytes);
 
         let (s1, outbound_msg) = SPAKE2::<Ed25519Group>::start_symmetric(
            &Password::new(&password.as_bytes()),
@@ -89,7 +90,7 @@ impl Portal {
 
         return (Portal {
             direction: direction,
-            id: id,
+            id: id_hash,
             filename: filename,
             filesize: 0,
             state: Some(s1),

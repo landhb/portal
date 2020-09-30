@@ -7,7 +7,7 @@ use std::collections::HashMap;
  *
  * https://www.eff.org/dice
  */
-pub fn gen_phrase() -> String {
+pub fn gen_phrase(count: usize) -> String {
     
     let mut phrase = vec!();
 
@@ -22,7 +22,7 @@ pub fn gen_phrase() -> String {
         res
     };
 
-    for _i in 0..3 {
+    for _i in 0..count {
         let y: u32 = get_index();
         phrase.push(*WORDS.get(&y).unwrap());
     }

@@ -73,7 +73,7 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
     let resp = match Portal::read_response_from(&mut client) {
         Ok(res) => res,
         Err(_e) => {
-            log_error!("Incorrect pass-phrase or peer disconnected. Try again.");
+            log_error!("No peer found. Try again.");
             std::process::exit(0);
         }
     };
@@ -90,8 +90,14 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
     /*
      * Step 4: Key derivation
      */
-    portal.confirm_peer(&confirm_msg).unwrap();
-    log_success!("Peer confirmed!");
+    match portal.confirm_peer(&confirm_msg) {
+        Ok(_) => {log_success!("Peer confirmed!");},
+        Err(_) => {
+            log_error!("Incorrect pass-phrase or peer disconnected. Try again.");
+            std::process::exit(0);
+        }
+    }
+    
         
     /*
      * Step 5: Begin file transfer
@@ -212,12 +218,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     match matches.subcommand() {
         ("send", Some(args)) =>  { 
 
-            let pass = gen_phrase();
-            log_success!("Tell your peer their pass-phrase is: {:?}", pass);
+            let id = gen_phrase(1);
+            let pass = gen_phrase(3);
+            log_success!("Tell your peer their pass-phrase is: {:?}", format!("{}-{}",id,pass));
             let file = args.value_of("filename").unwrap();
 
             let (mut req,msg) = Portal::init(
                 Some(portal::Direction::Sender),
+                id,
                 pass,
                 Some(file.to_string()),
             );
@@ -238,9 +246,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                 cfg.download_location = args.value_of("download_folder").unwrap().to_string();
             }
 
+            // Parse ID from password
+            let mut pass = pass.split('-');
+            let id = pass.nth(0).unwrap().to_string();
+            let opass = pass.collect::<Vec<&str>>().join("-");
+
             let (req,msg) = Portal::init(
                 Some(portal::Direction::Receiver),
-                pass,
+                id,
+                opass,
                 None, // receiver will get the filename from the sender
             );
 
