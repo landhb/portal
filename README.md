@@ -1,9 +1,38 @@
 
 ## Portal
 
-Magically transport your files.
+Securely & quickly transport your files.
 
-### Directory structure:
+### Client Install
+
+```
+cargo install portal
+```
+
+On the first run, a configuration file will be created in:
+
+|Platform | Value                                 | Example                                  |
+| ------- | ------------------------------------- | ---------------------------------------- |
+| Linux   | `$XDG_CONFIG_HOME` or `$HOME`/.config | /home/alice/.config/portal                     |
+| macOS   | `$HOME`/Library/Application Support   | /Users/Alice/Library/Application Support/portal |
+| Windows | `{FOLDERID_RoamingAppData}`           | C:\Users\Alice\AppData\Roaming\portal           |
+
+
+Note: The default relay is `portal-relay.landhb.dev`.
+
+### Relay Install
+
+If you wish to run your own relay, you can install the binary on a server with:
+
+```
+cargo install portal-relay
+```
+
+Note: An example service file is included in the `relay/` directory.
+
+### Development:
+
+The repo is a cargo workspace with the following directory structure:
 
 ```
 lib/        # implementation of the protocol
@@ -11,7 +40,7 @@ relay/      # relay server source
 client/     # client source
 ```
 
-### Run with:
+You can run the binaries individually with:
 
 ```
 # window 1
@@ -21,5 +50,5 @@ cargo run --bin portal-relay
 cargo run --bin portal -- recv
 
 # window 3
-cargo run --bin portal -- send -i [ID]
+cargo run --bin portal -- send [FILE]
 ```
