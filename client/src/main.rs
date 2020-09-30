@@ -17,6 +17,7 @@ use directories::UserDirs;
 extern crate lazy_static;
 
 mod wordlist;
+use wordlist::gen_phrase;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct AppConfig {
@@ -55,37 +56,6 @@ macro_rules! log_success {
     ($($arg:tt)*) => (println!("{} {}", "[+]".green().bold(), format_args!($($arg)*)));
 } 
 
-/** 
- * Generates a pass-phrase with the EFF's dice generated
- * word list
- *
- * https://www.eff.org/dice
- */
-fn gen_phrase() -> String {
-    use rand::Rng;
-    use wordlist::WORDS;
-
-    let mut phrase = vec!();
-
-    let mut rng = rand::thread_rng();
-    let mut get_index = || {
-        let mut pos = 1;
-        let mut res = 0;
-        for _i in 0..5 {
-            res += rng.gen_range(1, 6)*pos;
-            pos *= 10;
-        }
-        res
-    };
-
-    for _i in 0..3 {
-        let y: u32 = get_index();
-        phrase.push(*WORDS.get(&y).unwrap());
-    }
-
-    let r = phrase.join("-");
-    r.to_string()
-}
 
 
 fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net::TcpStream, is_reciever: bool) -> Result<(), Box<dyn Error>>  {
