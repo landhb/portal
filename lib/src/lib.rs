@@ -18,6 +18,7 @@ use chacha20poly1305::aead::{Aead, NewAead};
 pub mod errors;
 use errors::PortalError;
 
+pub const DEFAULT_PORT: u16 = 13265;
 
 /**
  * The primary interface into the library

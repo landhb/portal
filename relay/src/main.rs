@@ -48,11 +48,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut events = Events::with_capacity(128);
 
     // Setup the server socket.
-    let addr = "127.0.0.1:13265".parse()?;
+    let addr = format!("0.0.0.0:{}",portal::DEFAULT_PORT).parse()?;
     let mut server = TcpListener::bind(&addr)?;
 
     // Start listening for incoming connections.
-    //poll.registry()
     poll.register(&mut server, SERVER, Ready::readable(), PollOpt::level())?;
 
     let mut unique_token = Token(SERVER.0+1);
