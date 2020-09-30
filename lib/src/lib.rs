@@ -141,13 +141,6 @@ impl PortalFile {
         }
     }
 
-    /*pub fn write(&self, data: &[u8]) -> Result<usize> {
-        match self {
-            PortalFile::Immutable(_inner) => Err(PortalError::Mutability.into()),
-            PortalFile::Mutable(inner) => {return inner.write(data);},
-        }
-    } */
-
     pub fn process_next_chunk<R>(&self,reader: R) -> Result<usize> 
     where
         R: std::io::Read {
@@ -197,7 +190,7 @@ impl Portal {
      */
     pub fn init(direction: Option<Direction>, 
                 password: String,
-                filename: Option<String>) -> (Portal,Vec<u8>) {
+                mut filename: Option<String>) -> (Portal,Vec<u8>) {
 
         
         // use password to compute ID string
@@ -210,6 +203,12 @@ impl Portal {
            &Password::new(&password.as_bytes()),
            &Identity::new(&id_bytes));
        
+        // if a file was provided, trim it to just the file name
+        if let Some(file) = filename {
+            let f = std::path::Path::new(&file);
+            let f = f.file_name().unwrap().to_str().unwrap();
+            filename = Some(f.to_string());
+        }
 
         return (Portal {
             direction: direction,

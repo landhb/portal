@@ -11,18 +11,29 @@ use colored::*;
 use serde::{Serialize, Deserialize};
 use confy;
 use dns_lookup::lookup_host;
+use directories::UserDirs;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct AppConfig {
     relay_host: String,
     relay_port: u16,
+    download_location: String,
 }
 
 impl ::std::default::Default for AppConfig {
     fn default() -> Self { 
+
+        // select ~/Downloads or /tmp for downloads
+        let hdir = UserDirs::new();
+        let ddir = match &hdir {
+            Some(home) => home.download_dir().map_or("/tmp",|v| v.to_str().unwrap()),
+            None => "/tmp",
+        };
+        
         Self {
             relay_host: String::from("portal-relay.landhb.dev"),
             relay_port: portal::DEFAULT_PORT,
+            download_location: String::from(ddir),
         }
     }
 }
@@ -40,7 +51,7 @@ macro_rules! log_success {
 } 
 
 
-fn transfer(mut portal: Portal, msg: Vec<u8>, file_path: Option<&str>, mut client: std::net::TcpStream, is_reciever: bool) -> Result<(), Box<dyn Error>>  {
+fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net::TcpStream, is_reciever: bool) -> Result<(), Box<dyn Error>>  {
 
     /*
      * Step 1: Portal Request
@@ -53,6 +64,7 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, file_path: Option<&str>, mut clien
      */
     log_status!("Waiting for peer to connect...");
     let resp = Portal::read_response_from(&mut client)?;
+    log_success!("Peer connected.");
 
     /*
      * Step 3: PAKE2 msg exchange
@@ -81,7 +93,7 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, file_path: Option<&str>, mut clien
 
         true => {
 
-            let fname = resp.get_file_name()?;
+            let fname = format!("{}/{}",fpath, resp.get_file_name()?);
             let fsize = resp.get_file_size();
             log_success!("Your transfer ID is: {:?}", resp.get_id());
             log_status!("Downloading file: {:?}, size: {:?}", fname, fsize);
@@ -90,7 +102,7 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, file_path: Option<&str>, mut clien
             pb.set_style(pstyle);
 
             // create outfile
-            let file = portal.create_file("/tmp/test")?;
+            let file = portal.create_file(&fname)?;
 
             // Receive until connection is done
             while let Ok(len) = file.process_next_chunk(&client) {
@@ -104,13 +116,13 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, file_path: Option<&str>, mut clien
 
             let id = resp.get_id();
             log_success!("Your transfer ID is: {:?}", id);
-            log_status!("Sending file: {:?}", file_path.unwrap());
+            log_status!("Sending file: {:?}", portal.get_file_name().unwrap());
 
             let pb = ProgressBar::new(portal.get_file_size());
             pb.set_style(pstyle);
 
             // open file read-only for sending
-            let file = portal.load_file(file_path.unwrap())?;
+            let file = portal.load_file(fpath)?;
 
             // This will be empty for files created with create_file()
             let csize = 16384;
@@ -143,26 +155,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                                   .short("f")
                                   .takes_value(true)
                                   .required(true)
+                                  .index(1)
                                   .help("file to transfer"))
-                              .arg(Arg::with_name("password")
-                                  .short("i")
-                                  .takes_value(true)
-                                  .required(true)
-                                  .help("id to send to"))
                   )
                   .subcommand(SubCommand::with_name("recv")
                               .about("Recieve a file")
-                              .arg(Arg::with_name("timeout")
-                                  .short("t")
+                              .arg(Arg::with_name("download_folder")
+                                  .short("d")
                                   .takes_value(true)
                                   .required(false)
-                                  .help("Timeout for the transfer"))
+                                  .help("override download folder"))
                   )
                   .get_matches();
 
 
     // Load/create config location
-    let cfg: AppConfig = confy::load(env!("CARGO_PKG_NAME"))?;
+    let mut cfg: AppConfig = confy::load(env!("CARGO_PKG_NAME"))?;
     log_status!("Using portal.toml config, relay: {}!", cfg.relay_host.yellow());
 
     // Determin the IP address to connect to
@@ -204,7 +212,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let metadata = std::fs::metadata(file)?;
             req.set_file_size(metadata.len());
 
-            transfer(req,msg, args.value_of("filename"),client, false)?;
+            transfer(req,msg,file,client, false)?;
             
         },
         ("recv", Some(args)) =>  { 
@@ -212,6 +220,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let pass = rpassword::read_password_from_tty(Some("Password: ")).unwrap();
 
+            // check if we need to override the download location
+            if args.is_present("download_folder") {
+                cfg.download_location = args.value_of("download_folder").unwrap().to_string();
+            }
 
             let (req,msg) = Portal::init(
                 Some(portal::Direction::Receiver),
@@ -219,7 +231,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 None, // receiver will get the filename from the sender
             );
 
-            transfer(req,msg, args.value_of("filename"),client, true)?;
+            transfer(req,msg,&cfg.download_location,client, true)?;
 
         },
         _ => {println!("Please provide a valid subcommand. Run portal -h for more information.");},

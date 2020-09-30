@@ -228,7 +228,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2913470204e9e8498a0f31f17f90a0de801ae92c8c5ac18c49af4819e6786697"
 dependencies = [
- "directories",
+ "directories 2.0.2",
  "serde",
  "toml",
 ]
@@ -321,6 +321,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "551a778172a450d7fc12e629ca3b0428d00f6afa9a43da1b630d54604e97371c"
 dependencies = [
  "cfg-if",
+ "dirs-sys",
+]
+
+[[package]]
+name = "directories"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8fed639d60b58d0f53498ab13d26f621fd77569cc6edb031f4cc36a2ad9da0f"
+dependencies = [
  "dirs-sys",
 ]
 
@@ -663,6 +672,7 @@ dependencies = [
  "clap",
  "colored",
  "confy",
+ "directories 3.0.1",
  "dns-lookup",
  "indicatif",
  "portal-lib",
