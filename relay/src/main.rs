@@ -83,7 +83,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Use to reference existing endpoints and their polling tokens
     let endpoints: Rc<RefCell<HashMap<Token, Endpoint>>> = Rc::new(RefCell::new(HashMap::new()));
-    let mut lookup_token: HashMap<String, Token> = HashMap::new();
 
     
     // Start an event loop.
@@ -213,11 +212,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                             log!("Added sender {:?}", endpoints);
 
                             ref_endpoints.entry(token).or_insert(endpoint);
-                            lookup_token.entry(id.to_string()).or_insert(token);
 
                         }
                         Some(portal::Direction::Sender) => {
 
+                            /*
+                             * Check that ID is unique
+                             */
+                            let id = req.get_id();
+                            let ref_endpoints = endpoints.borrow();
+                            let search = ref_endpoints.iter()
+                            .find_map(|(key, val)| if *val.id == *id { Some(key) } else { None });
+
+                            match search {
+                                Some(t) => t.clone(),
+                                None => {continue;}
+                            };
 
                             // We need to register for READABLE events to detect a closed connection
                             let token = next(&mut unique_token);
@@ -270,8 +280,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     log!("event {:?} on token {:?}", event, token);
 
-                    // save the session id
-                    let id = client.id.clone();
 
                     // perform the action
                     let (done,trx) = handlers::handle_client_event(token,&poll, client, &event)?;
@@ -295,7 +303,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // shutdown the connection
                     if done || (trx <= 0 && !endpoints.borrow().contains_key(&peer_token)) {
                         log!("Removing endpoint for {:?}", token);
-                        lookup_token.remove(&id);
                         if let Some(mut client) = endpoints.borrow_mut().remove(&token) {
                             poll.deregister(&mut client.stream)?;
                             match client.stream.shutdown(std::net::Shutdown::Both) {
