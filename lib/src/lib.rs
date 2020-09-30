@@ -3,20 +3,23 @@ use serde::{Serialize, Deserialize};
 use std::fs::File;
 use memmap::Mmap;
 use std::fs::OpenOptions;
-use std::cell::RefCell;
-
-use rand::Rng;
 
 // Key Exchange
 use spake2::{Ed25519Group, Identity, Password, SPAKE2,Group};
 use sha2::{Sha256, Digest};
 
 // File encryption
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce}; // Or `XChaCha20Poly1305`
-use chacha20poly1305::aead::{Aead, NewAead};
+use chacha20poly1305::{ChaCha20Poly1305, Key}; 
+use chacha20poly1305::aead::{NewAead};
 
 pub mod errors;
+mod file;
+mod chunks;
+
+
 use errors::PortalError;
+use file::{PortalFile,PortalFileImmutable,PortalFileMutable};
+use chunks::PortalChunks;
 
 pub const DEFAULT_PORT: u16 = 13265;
 
@@ -56,132 +59,6 @@ pub enum Direction {
     Receiver,
 }
 
-
-/**
- * A file mapping, either an immutable mmap 
- */
-pub enum PortalFile {
-    Immutable(PortalFileImmutable),
-    Mutable(PortalFileMutable),
-}
-
-pub struct PortalFileImmutable {
-    mmap: Mmap,
-    state: PortalEncryptState,
-}
-
-pub struct PortalFileMutable {
-    file: RefCell<File>,
-    state: PortalEncryptState,
-}
-
-#[derive(Serialize, Deserialize, PartialEq)]
-struct PortalChunk {
-    nonce: Vec<u8>,
-    data: Vec<u8>,
-}
-
-pub struct PortalChunks<'a, T: 'a> {
-    v: &'a [T],
-    chunk_size: usize,
-    settings: &'a PortalFile,
-}
-
-
-impl<'a> Iterator for PortalChunks<'a,u8> 
-{
-    type Item = Vec<u8>; //&'a [u8];
-
-    // The return type is `Option<T>`:
-    //     * When the `Iterator` is finished, `None` is returned.
-    //     * Otherwise, the next value is wrapped in `Some` and returned.
-    fn next(&mut self) -> Option<Self::Item> {
-
-        // return up to the next chunk size
-        if self.v.is_empty() {
-            return None;
-        }
-
-        let cipher = match self.settings {
-            PortalFile::Immutable(inner) => &inner.state.cipher,
-            PortalFile::Mutable(_) => {return None;},
-        };
-
-        let chunksz = std::cmp::min(self.v.len(), self.chunk_size);
-        let (beg,end) = self.v.split_at(chunksz);
-
-        // update next slice 
-        self.v = end; 
-
-        // Generate random nonce
-        let mut rng = rand::thread_rng();
-        let rbytes  = rng.gen::<[u8;12]>();
-        let nonce = Nonce::from_slice(&rbytes); // 128-bits; unique per chunk
-
-        // TODO: encrypt in place instead of returning new Vec
-        let data = cipher.encrypt(nonce,beg).expect("encryption failure!");
-        let chunk = PortalChunk {
-            nonce: nonce.as_slice().to_owned(),
-            data: data,
-        };
-        match bincode::serialize(&chunk) {
-            Ok(v) => Some(v),
-            Err(_) => None,
-        } 
-    }
-} 
-
-
-impl PortalFile {
-
-    fn get_bytes(&self) -> Result<&[u8]> {
-        match self {
-            PortalFile::Immutable(inner) => Ok(&inner.mmap[..]),
-            PortalFile::Mutable(_inner) => Err(PortalError::Mutability.into()),
-        }
-    }
-
-    pub fn process_next_chunk<R>(&self,reader: R) -> Result<usize> 
-    where
-        R: std::io::Read {
-        match self {
-            PortalFile::Immutable(_inner) => Err(PortalError::Mutability.into()),
-            PortalFile::Mutable(inner) => {return inner.process_next_chunk(reader);},
-        }
-    }
-}
-
-
-
-impl PortalFileMutable {
-
-
-    fn process_next_chunk<R>(&self,reader: R) -> Result<usize>
-    where 
-        R: std::io::Read {
-        let chunk: PortalChunk = bincode::deserialize_from::<R,PortalChunk>(reader)?;
-        Ok(self.write(chunk)?)
-    }
-
-    fn write(&self, chunk: PortalChunk) -> Result<usize> {
-        use std::io::Write;
-        let nonce = Nonce::from_slice(&chunk.nonce[..]);
-        let dec_data = self.state.cipher.decrypt(nonce,&chunk.data[..]).expect("decryption failure!");
-        self.file.borrow_mut().write_all(&dec_data)?;
-        Ok(chunk.data.len())
-    } 
-
-}
-
-
-impl Drop for PortalFileMutable {
-
-    // attempt to flush to disk
-    fn drop(&mut self) {
-        let _ = self.file.get_mut().sync_all();
-    }
-
-} 
 
 impl Portal {
     
@@ -298,10 +175,7 @@ impl Portal {
             cipher: ChaCha20Poly1305::new(cha_key),
         };
 
-        Ok(PortalFile::Immutable(PortalFileImmutable{
-            mmap: mmap,
-            state: state,
-        }))
+        Ok(PortalFile::Immutable(PortalFileImmutable::init(mmap,state)))
     }
 
 
@@ -324,10 +198,7 @@ impl Portal {
             cipher: ChaCha20Poly1305::new(cha_key),
         };
 
-        Ok(PortalFile::Mutable(PortalFileMutable{
-            file: RefCell::new(file),
-            state: state,
-        }))
+        Ok(PortalFile::Mutable(PortalFileMutable::init(file,state)))
     }
 
     /**
@@ -341,11 +212,11 @@ impl Portal {
             Err(_) => &[], // iterator will be empty for writer files
         };
 
-        PortalChunks{
-            v: &bytes, // TODO: verify that this is zero-copy/move
-            chunk_size: chunk_size,
-            settings: data,
-        }
+        PortalChunks::init(
+            &bytes, // TODO: verify that this is zero-copy/move
+            chunk_size,
+            data,
+        )
     }
 
 
@@ -391,58 +262,105 @@ mod tests {
         let pass ="test".to_string();
         let (mut sender,sender_msg) = Portal::init(dir,pass,None);
 
-
         receiver.confirm_peer(&sender_msg).unwrap();
         sender.confirm_peer(&receiver_msg).unwrap();
 
-        assert!(receiver.key == sender.key);
+        assert_eq!(receiver.key,sender.key);
     }
 
 
     #[test]
     fn portalfile_iterator() {
+        
+        // receiver
+        let dir = Some(Direction::Receiver);
+        let pass ="test".to_string();
+        let (_receiver,receiver_msg) = Portal::init(dir,pass,None);
+
+        // sender
         let dir = Some(Direction::Sender);
         let pass ="test".to_string();
-        let (portal,_msg) = Portal::init(dir,pass,None);
+        let (mut sender,_sender_msg) = Portal::init(dir,pass,None);
+
+        // Confirm
+        sender.confirm_peer(&receiver_msg).unwrap();
 
         // TODO change test file
-        let file = portal.load_file("/etc/passwd").unwrap();
+        let file = sender.load_file("/etc/passwd").unwrap();
 
         let chunk_size = 10;
-        let chunks = portal.get_chunks(&file,chunk_size);
+        let chunks = sender.get_chunks(&file,chunk_size);
         for v in chunks.into_iter() {
-            assert!(v.len() <= chunk_size);
+            // Encrypted chunk size will always be
+            // chunk_size + 32 + 12, because: 
+            //
+            // - ChaCha20 is a 256bit cipher = 32 bytes
+            // - The attached nonce is 12 bytes
+            assert!(v.len() <= chunk_size+32+12);
         }
 
 
         let chunk_size = 1024;
-        let chunks = portal.get_chunks(&file,chunk_size);
+        let chunks = sender.get_chunks(&file,chunk_size);
         for v in chunks.into_iter() {
-            assert!(v.len() <= chunk_size);
+            assert!(v.len() <= chunk_size+32+12);
         }
 
     }
 
     #[test]
     fn portal_createfile() {
+        // receiver
+        let dir = Some(Direction::Receiver);
+        let pass ="test".to_string();
+        let (mut receiver,receiver_msg) = Portal::init(dir,pass,None);
+
+        // sender
+        let dir = Some(Direction::Sender);
+        let pass ="test".to_string();
+        let (mut sender,sender_msg) = Portal::init(dir,pass,None);
+
+        // Confirm
+        sender.confirm_peer(&receiver_msg).unwrap();
+        receiver.confirm_peer(&sender_msg).unwrap();
+
+        // TODO change test file
+        let file_src = sender.load_file("/etc/passwd").unwrap();
+        let file_dst = receiver.create_file("/tmp/passwd").unwrap();
+
+        let chunk_size = 4096;
+        let chunks = sender.get_chunks(&file_src,chunk_size);
+
+        for v in chunks.into_iter() {
+
+             assert!(v.len() <= chunk_size+32+12);
+
+            // test writing chunk
+            file_dst.process_given_chunk(&v).unwrap();
+        } 
+    }
+
+
+    #[test]
+    #[should_panic]
+    fn portal_createfile_no_peer() {
         let dir = Some(Direction::Sender);
         let pass = "test".to_string();
         let (portal,_msg) = Portal::init(dir,pass, None);
 
-        // TODO change test file
-        let file_src = portal.load_file("/etc/passwd").unwrap();
-        let file_dst = portal.create_file("/tmp/passwd").unwrap();
+        // will panic due to lack of peer
+        let _file_dst = portal.create_file("/tmp/passwd").unwrap();
+    }
 
-        let chunk_size = 1024;
-        let chunks = portal.get_chunks(&file_src,chunk_size);
-        for v in chunks.into_iter() {
+    #[test]
+    #[should_panic]
+    fn portal_loadfile_no_peer() {
+        let dir = Some(Direction::Sender);
+        let pass = "test".to_string();
+        let (portal,_msg) = Portal::init(dir,pass, None);
 
-            assert!(v.len() <= chunk_size);
-
-            // test writing chunk
-            file_dst.write(&v).unwrap();
-        }
-
+        // will panic due to lack of peer
+        let _file_src = portal.load_file("/etc/passwd").unwrap();
     }
 
 }
