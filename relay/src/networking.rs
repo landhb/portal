@@ -28,7 +28,7 @@ pub fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> 
             // Would block "errors" are the OS's way of saying that the
             // connection is not actually ready to perform this I/O operation.
             Err(ref err) if would_block(err) => break,
-            Err(ref err) if interrupted(err) => continue,
+            Err(ref err) if interrupted(err) => break,
             // Other errors we'll consider fatal.
             Err(err) => return Err(err.into()),
         }

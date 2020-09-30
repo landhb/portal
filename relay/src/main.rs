@@ -11,6 +11,7 @@ use std::io::Write;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Ready, Poll, Token, PollOpt}; 
 use os_pipe::{pipe,PipeReader,PipeWriter};
+use std::time::SystemTime;
 
 mod handlers;
 mod networking;
@@ -28,6 +29,7 @@ pub struct Endpoint {
     peer_writer: Option<PipeWriter>,
     peer_reader: Option<PipeReader>,
     peer_token: Option<Token>,
+    time_added: SystemTime,
 }
 
 
@@ -97,6 +99,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             match event.token() {
 
                 SERVER => loop {
+
+                    // Clear old entries before accepting, will keep
+                    // connections < 15 min old
+                    endpoints.borrow_mut().retain(|_, v| 
+                        v.time_added.elapsed().unwrap().as_secs() < 
+                        std::time::Duration::from_secs(60*15).as_secs());
 
                     // If this is an event for the server, it means a connection
                     // is ready to be accepted.
@@ -198,7 +206,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 peer_reader: old_reader,
                                 peer_writer: Some(writer2), //None,
                                 peer_token: Some(peer_token),
-                                
+                                time_added: SystemTime::now(),
                             };
 
                             log!("Added sender {:?}", endpoints);
@@ -226,6 +234,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 peer_writer: Some(writer),
                                 peer_reader: Some(reader),
                                 peer_token: None,
+                                time_added: SystemTime::now(),
                             };
 
                             log!("{:?}", endpoint);
@@ -288,7 +297,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                         lookup_token.remove(&id);
                         if let Some(mut client) = endpoints.borrow_mut().remove(&token) {
                             poll.deregister(&mut client.stream)?;
-                            client.stream.shutdown(std::net::Shutdown::Both)?;
+                            match client.stream.shutdown(std::net::Shutdown::Both) {
+                                Ok(_) => {},
+                                Err(_) => {},
+                            }
                         }
                     }
 

@@ -100,7 +100,13 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
      * Step 2: Portal Response/Acknowledgement of peering
      */
     log_status!("Waiting for peer to connect...");
-    let resp = Portal::read_response_from(&mut client)?;
+    let resp = match Portal::read_response_from(&mut client) {
+        Ok(res) => res,
+        Err(_e) => {
+            log_error!("Incorrect pass-phrase or peer disconnected. Try again.");
+            std::process::exit(0);
+        }
+    };
     log_success!("Peer connected.");
 
     /*
