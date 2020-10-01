@@ -5,9 +5,6 @@ use crate::Endpoint;
 use mio::event::Event;
 use anyhow::Result;
 use std::os::unix::io::AsRawFd;
-
-//use crate::logging::*;
-
 use crate::log;
 
 /**
@@ -109,7 +106,6 @@ pub fn handle_client_event (
             return Ok((true,trx));
         }
 
-        //log!("wrote {} bytes to pipe", trx);
         log!("got {} bytes from {:?}", trx, endpoint.dir);
 
         // If this is the Reciever, the we've received the last message

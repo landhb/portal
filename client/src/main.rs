@@ -1,7 +1,7 @@
 extern crate portal_lib as portal;
 
 use portal::Portal;
-use std::net::TcpStream;
+use async_std::net::TcpStream; //use std::net::TcpStream;
 use std::io::Write;
 use std::error::Error;
 use clap::{Arg, App, SubCommand,AppSettings};
@@ -12,6 +12,8 @@ use serde::{Serialize, Deserialize};
 use confy;
 use dns_lookup::lookup_host;
 use directories::UserDirs;
+
+use async_std::prelude::*;
 
 #[macro_use]
 extern crate lazy_static;
@@ -58,34 +60,34 @@ macro_rules! log_success {
 
 
 
-fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net::TcpStream, is_reciever: bool) -> Result<(), Box<dyn Error>>  {
+fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: TcpStream, is_reciever: bool) -> Result<(), Box<dyn Error>>  {
 
     /*
      * Step 1: Portal Request
      */
     let req = portal.serialize()?;
-    client.write_all(&req)?;
+    async_std::task::block_on(async { client.write_all(&req).await });
 
     /*
      * Step 2: Portal Response/Acknowledgement of peering
      */
     log_status!("Waiting for peer to connect...");
-    let resp = match Portal::read_response_from(&mut client) {
+    let resp = match async_std::task::block_on(async { Portal::read_response_from(&mut client).await }) {
         Ok(res) => res,
         Err(_e) => {
             log_error!("No peer found. Try again.");
             std::process::exit(0);
         }
     };
-    log_success!("Peer connected.");
 
     /*
      * Step 3: PAKE2 msg exchange
      */
-    client.write_all(&msg)?;
-    log_status!("Waiting for PAKE2 msg exchange...");
-    let confirm_msg = Portal::read_confirmation_from(&mut client)?;
-
+    let confirm_msg = async_std::task::block_on(async { 
+      client.write_all(&msg).await;
+      return Portal::read_confirmation_from(&mut client).await.unwrap(); 
+    });
+    
 
     /*
      * Step 4: Key derivation
@@ -97,7 +99,6 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
             std::process::exit(0);
         }
     }
-    
         
     /*
      * Step 5: Begin file transfer
@@ -114,7 +115,6 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
 
             let fname = format!("{}/{}",fpath, resp.get_file_name()?);
             let fsize = resp.get_file_size();
-            log_success!("Your transfer ID is: {:?}", resp.get_id());
             log_status!("Downloading file: {:?}, size: {:?}", fname, fsize);
 
             let pb = ProgressBar::new(fsize);
@@ -123,19 +123,21 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
             // create outfile
             let file = portal.create_file(&fname)?;
 
-            // Receive until connection is done
-            while let Ok(len) = file.process_next_chunk(&client) {
-                total += len;
-                pb.set_position(total as u64);
-            }
+            // Asynchronously download chunks and write them to disk
+            // until the connection is done
+            async_std::task::block_on(async {
+              while let Ok(chunk) = file.process_next_chunk(&client).await {
+                  let len = file.write(chunk).await.unwrap();
+                  total += len;
+                  pb.set_position(total as u64);
+              }
+            });
 
             pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
         }
         false => {
 
-            let id = resp.get_id();
-            log_success!("Your transfer ID is: {:?}", id);
-            log_status!("Sending file: {:?}", portal.get_file_name().unwrap());
+            log_status!("Sending file: {:?}, size: {:?}", portal.get_file_name().unwrap(),portal.get_file_size());
 
             let pb = ProgressBar::new(portal.get_file_size());
             pb.set_style(pstyle);
@@ -147,11 +149,15 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
             let csize = 16384;
             let chunks = portal.get_chunks(&file,csize);
 
-            for data in chunks.into_iter() {
-                client.write_all(&data)?;
-                total += csize; 
-                pb.set_position(total as u64);
-            }
+            // Asynchronously upload and encrypt chunks 
+            // until the connection is done
+            async_std::task::block_on(async {
+              for data in chunks.into_iter() {
+                  client.write_all(&data).await;
+                  total += csize; 
+                  pb.set_position(total as u64);
+              }
+            });
 
             pb.finish_with_message(format!("Sent {:?} bytes", total).as_str());
         }
@@ -200,19 +206,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             ips[0]
         }
     };
-
-    log_success!("Resolved relay to {:?} port {}!", addr, cfg.relay_port);
     
     let addr: std::net::SocketAddr = format!("{}:{}",addr, cfg.relay_port).parse()?;
 
-
-    let client = match TcpStream::connect_timeout(&addr, std::time::Duration::new(3, 0)) {
+    let client = async_std::task::block_on(async {
+      return match TcpStream::connect(&addr).await { //::connect_timeout(&addr, std::time::Duration::new(3, 0)) {
         Ok(res) => res,
         Err(e) => {
-            log_error!("Failed to connect");
-            return Err(e.into());
+            log_error!("Failed to connect: {:?}", e);
+            std::process::exit(-1);
         }
-    };
+      };
+    });
     log_success!("Connected to {:?}!", addr);
 
     match matches.subcommand() {

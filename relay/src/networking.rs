@@ -13,8 +13,7 @@ fn interrupted(err: &io::Error) -> bool {
 
 
 pub fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> Result<isize> {
-    //let mut connection_closed = false;
-    //let mut received_data = Vec::with_capacity(4096);
+
     loop {
         let mut buf = [0; 256];
         match connection.read(&mut buf) {
