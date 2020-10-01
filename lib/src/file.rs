@@ -24,7 +24,7 @@ pub struct PortalFileImmutable {
 }
 
 pub struct PortalFileMutable {
-    file: RefCell<async_std::fs::File>, //RefCell<std::fs::File>,
+    file: RefCell<std::fs::File>,
     pub state: PortalEncryptState,
 }
 
@@ -44,26 +44,19 @@ impl PortalFile {
         }
     }
 
-    pub async fn process_next_chunk<R>(&self,reader: R) -> Result<PortalChunk> 
+    pub fn process_next_chunk<R>(&self,reader: R) -> Result<usize> 
     where
-        R: async_std::io::ReadExt + std::marker::Unpin {
+        R: std::io::Read {
         match self {
             PortalFile::Immutable(_inner) => Err(PortalError::Mutability.into()),
-            PortalFile::Mutable(inner) => {return inner.process_next_chunk(reader).await;},
+            PortalFile::Mutable(inner) => {return inner.process_next_chunk(reader);},
         }
     }
 
-    pub fn process_given_chunk(&self,data: &[u8]) -> Result<PortalChunk> {
+    pub fn process_given_chunk(&self,data: &[u8]) -> Result<usize> {
         match self {
             PortalFile::Immutable(_inner) => Err(PortalError::Mutability.into()),
             PortalFile::Mutable(inner) => {return inner.process_given_chunk(data);},
-        }
-    } 
-
-    pub async fn write(&self, chunk: PortalChunk) -> Result<usize> {
-        match self {
-            PortalFile::Immutable(_inner) => Err(PortalError::Mutability.into()),
-            PortalFile::Mutable(inner) => {return inner.write(chunk).await;},
         }
     }
 }
@@ -80,7 +73,7 @@ impl PortalFileImmutable {
 
 impl PortalFileMutable {
 
-    pub fn init(file: async_std::fs::File, state: PortalEncryptState) -> PortalFileMutable {
+    pub fn init(file: std::fs::File, state: PortalEncryptState) -> PortalFileMutable {
         PortalFileMutable{
             file: RefCell::new(file),
             state: state,
@@ -88,35 +81,23 @@ impl PortalFileMutable {
     }
 
 
-    async fn process_next_chunk<R>(&self,mut reader: R) -> Result<PortalChunk>
+    fn process_next_chunk<R>(&self,reader: R) -> Result<usize>
     where 
-        R: async_std::io::ReadExt + std::marker::Unpin{
-
-        // Parse the size from the stream
-        let mut size_data = vec![0u8; 8];
-        reader.read_exact(&mut size_data).await?;
-        let size: usize = bincode::deserialize(&size_data)?;
-
-        // Attempt to read chunk from socket
-        let mut buf = vec![0;size];
-        reader.read_exact(&mut buf).await?;
-
-        // Attempt to deserialize
-        let chunk: PortalChunk = bincode::deserialize(&buf)?;
-        Ok(chunk)
+        R: std::io::Read {
+        let chunk: PortalChunk = bincode::deserialize_from::<R,PortalChunk>(reader)?;
+        Ok(self.write(chunk)?)
     }
 
-    fn process_given_chunk(&self,data: &[u8]) -> Result<PortalChunk> {
+    fn process_given_chunk(&self,data: &[u8]) -> Result<usize> {
         let chunk: PortalChunk = bincode::deserialize(data)?;
-        Ok(chunk)
-    } 
+        Ok(self.write(chunk)?)
+    }
 
-    async fn write(&self, chunk: PortalChunk) -> Result<usize> {
-        //use std::io::Write;
-        use async_std::prelude::*;
+    fn write(&self, chunk: PortalChunk) -> Result<usize> {
+        use std::io::Write;
         let nonce = Nonce::from_slice(&chunk.nonce[..]);
         let dec_data = self.state.cipher.decrypt(nonce,&chunk.data[..]).expect("decryption failure!");
-        self.file.borrow_mut().write_all(&dec_data).await?;
+        self.file.borrow_mut().write_all(&dec_data)?;
         Ok(chunk.data.len())
     } 
 

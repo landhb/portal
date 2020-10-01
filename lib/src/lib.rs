@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Serialize, Deserialize};
 use std::fs::File;
 use memmap::Mmap;
+use std::fs::OpenOptions;
 
 // Key Exchange
 use spake2::{Ed25519Group, Identity, Password, SPAKE2,Group};
@@ -10,10 +11,6 @@ use sha2::{Sha256, Digest};
 // File encryption
 use chacha20poly1305::{ChaCha20Poly1305, Key}; 
 use chacha20poly1305::aead::{NewAead};
-
-
-// Async extension
-use async_std::fs::OpenOptions; //use std::fs::OpenOptions;
 
 pub mod errors;
 mod file;
@@ -103,94 +100,17 @@ impl Portal {
 
     /**
      * Construct from a stream reader, consuming the bytes
-     * 
-     * Note: Will block until response is received
      */
-    pub fn read_response_from<R>(mut reader: R) -> Result<Portal>  
-    where
-        R: async_std::io::ReadExt + std::marker::Unpin  {
-
-        // Parse the size from the stream
-        let mut data = vec![0u8;8];
-
-        async_std::task::block_on(async {
-            while let Err(e) = reader.read_exact(&mut data).await {
-                if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                    break;
-                }                
-            }
-        });
-        println!("{:?}", data.len());
-        let size: usize = bincode::deserialize(&data).unwrap();
-        println!("Got size {:?}", size);
-
-        // Read the actual Struct
-        let mut buf = vec![0;size];
-        async_std::task::block_on(async {
-            while let Err(e) = reader.read_exact(&mut buf).await {
-                if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                    break;
-                }
-            }
-        });
-        println!("{:?}", buf); 
-        Ok(bincode::deserialize::<Portal>(&buf)?) 
-    }
-
-    /**
-     * Receive the bytes necessary for a confirmation message
-     * from a stream reader, consuming the bytes
-     *
-     * Note: Will block until response is received
-     */
-    pub fn read_confirmation_from<R>(mut reader: R) -> Result<[u8;33]> 
-    where
-       R: async_std::io::ReadExt + std::marker::Unpin {
-        assert_eq!(33,Portal::get_peer_msg_size());
-
-        async_std::task::block_on(async {
-            let mut res = [0u8;33];
-            reader.read_exact(&mut res).await?;
-            Ok(res)
-        })
-    }
-
-    /**
-     * Attempt to deserialize from a vector
-     */
-    pub fn parse(data: &Vec<u8>) -> Result<Portal> {
-        let size = bincode::deserialize::<u64>(&data)?;
-        let size_ser = bincode::serialized_size(&size)? as usize;
-        Ok(bincode::deserialize(&data[size_ser..])?)
-    }
-
-    /**
-     * Serialize a request
-     * To interface with a peer using async, we must
-     * prepend the data with a total size
-     */
-    pub fn serialize(&self) -> Result<Vec<u8>> { 
-        let size = bincode::serialized_size(&self)?;
-        println!("Adding size to beggining: {:?}", size);
-        let mut res = bincode::serialize(&size)?;
-        res.extend(bincode::serialize(&self)?);
-        Ok(res)
-    } 
-
-
-    /**
-     * Construct from a stream reader, consuming the bytes
-     *
     pub fn read_response_from<R>(reader: R) -> Result<Portal> 
     where
         R: std::io::Read {
         Ok(bincode::deserialize_from::<R,Portal>(reader)?)
     }
 
-    **
+    /**
      * Receive the bytes necessary for a confirmation message
      * from a stream reader, consuming the bytes
-     *
+     */
     pub fn read_confirmation_from<R>(mut reader: R) -> Result<[u8;33]> 
     where
        R: std::io::Read {
@@ -200,16 +120,16 @@ impl Portal {
         Ok(res)
     }
 
-    **
+    /**
      * Attempt to deserialize from a vector
-     *
+     */
     pub fn parse(data: &Vec<u8>) -> Result<Portal> {
         Ok(bincode::deserialize(&data)?)
     }
 
     pub fn serialize(&self) -> Result<Vec<u8>> {
         Ok(bincode::serialize(&self)?)
-    } */
+    }
 
     pub fn get_file_size(&self) -> u64 {
         self.filesize
@@ -265,11 +185,11 @@ impl Portal {
      */
     pub fn create_file<'a>(&'a self, f: &str) -> Result<PortalFile>  {
 
-        let file = async_std::task::block_on(OpenOptions::new()
+        let file = OpenOptions::new()
                        .read(true)
                        .write(true)
                        .create(true)
-                       .open(&f))?;
+                       .open(&f)?;
 
         let key = self.key.as_ref().ok_or_else(|| PortalError::NoPeer)?;
 
@@ -336,12 +256,12 @@ mod tests {
         // receiver
         let dir = Some(Direction::Receiver);
         let pass ="test".to_string();
-        let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let (mut receiver,receiver_msg) = Portal::init(dir,pass,None);
 
         // sender
         let dir = Some(Direction::Sender);
         let pass ="test".to_string();
-        let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let (mut sender,sender_msg) = Portal::init(dir,pass,None);
 
         receiver.confirm_peer(&sender_msg).unwrap();
         sender.confirm_peer(&receiver_msg).unwrap();
@@ -356,12 +276,12 @@ mod tests {
         // receiver
         let dir = Some(Direction::Receiver);
         let pass ="test".to_string();
-        let (_receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let (_receiver,receiver_msg) = Portal::init(dir,pass,None);
 
         // sender
         let dir = Some(Direction::Sender);
         let pass ="test".to_string();
-        let (mut sender,_sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let (mut sender,_sender_msg) = Portal::init(dir,pass,None);
 
         // Confirm
         sender.confirm_peer(&receiver_msg).unwrap();
@@ -394,12 +314,12 @@ mod tests {
         // receiver
         let dir = Some(Direction::Receiver);
         let pass ="test".to_string();
-        let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let (mut receiver,receiver_msg) = Portal::init(dir,pass,None);
 
         // sender
         let dir = Some(Direction::Sender);
         let pass ="test".to_string();
-        let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let (mut sender,sender_msg) = Portal::init(dir,pass,None);
 
         // Confirm
         sender.confirm_peer(&receiver_msg).unwrap();
@@ -427,7 +347,7 @@ mod tests {
     fn portal_createfile_no_peer() {
         let dir = Some(Direction::Sender);
         let pass = "test".to_string();
-        let (portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
+        let (portal,_msg) = Portal::init(dir,pass, None);
 
         // will panic due to lack of peer
         let _file_dst = portal.create_file("/tmp/passwd").unwrap();
@@ -438,7 +358,7 @@ mod tests {
     fn portal_loadfile_no_peer() {
         let dir = Some(Direction::Sender);
         let pass = "test".to_string();
-        let (portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
+        let (portal,_msg) = Portal::init(dir,pass, None);
 
         // will panic due to lack of peer
         let _file_src = portal.load_file("/etc/passwd").unwrap();
