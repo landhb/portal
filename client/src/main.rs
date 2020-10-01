@@ -83,7 +83,6 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
      * Step 3: PAKE2 msg exchange
      */
     client.write_all(&msg)?;
-    log_status!("Waiting for PAKE2 msg exchange...");
     let confirm_msg = Portal::read_confirmation_from(&mut client)?;
 
 
@@ -114,7 +113,6 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
 
             let fname = format!("{}/{}",fpath, resp.get_file_name()?);
             let fsize = resp.get_file_size();
-            log_success!("Your transfer ID is: {:?}", resp.get_id());
             log_status!("Downloading file: {:?}, size: {:?}", fname, fsize);
 
             let pb = ProgressBar::new(fsize);
@@ -133,9 +131,7 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
         }
         false => {
 
-            let id = resp.get_id();
-            log_success!("Your transfer ID is: {:?}", id);
-            log_status!("Sending file: {:?}", portal.get_file_name().unwrap());
+            log_status!("Sending file: {:?}, size: {:?}", portal.get_file_name().unwrap(),portal.get_file_size());
 
             let pb = ProgressBar::new(portal.get_file_size());
             pb.set_style(pstyle);

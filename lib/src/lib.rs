@@ -256,12 +256,12 @@ mod tests {
         // receiver
         let dir = Some(Direction::Receiver);
         let pass ="test".to_string();
-        let (mut receiver,receiver_msg) = Portal::init(dir,pass,None);
+        let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // sender
         let dir = Some(Direction::Sender);
         let pass ="test".to_string();
-        let (mut sender,sender_msg) = Portal::init(dir,pass,None);
+        let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         receiver.confirm_peer(&sender_msg).unwrap();
         sender.confirm_peer(&receiver_msg).unwrap();
@@ -276,12 +276,12 @@ mod tests {
         // receiver
         let dir = Some(Direction::Receiver);
         let pass ="test".to_string();
-        let (_receiver,receiver_msg) = Portal::init(dir,pass,None);
+        let (_receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // sender
         let dir = Some(Direction::Sender);
         let pass ="test".to_string();
-        let (mut sender,_sender_msg) = Portal::init(dir,pass,None);
+        let (mut sender,_sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // Confirm
         sender.confirm_peer(&receiver_msg).unwrap();
@@ -314,12 +314,12 @@ mod tests {
         // receiver
         let dir = Some(Direction::Receiver);
         let pass ="test".to_string();
-        let (mut receiver,receiver_msg) = Portal::init(dir,pass,None);
+        let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // sender
         let dir = Some(Direction::Sender);
         let pass ="test".to_string();
-        let (mut sender,sender_msg) = Portal::init(dir,pass,None);
+        let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // Confirm
         sender.confirm_peer(&receiver_msg).unwrap();
@@ -347,7 +347,7 @@ mod tests {
     fn portal_createfile_no_peer() {
         let dir = Some(Direction::Sender);
         let pass = "test".to_string();
-        let (portal,_msg) = Portal::init(dir,pass, None);
+        let (portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
 
         // will panic due to lack of peer
         let _file_dst = portal.create_file("/tmp/passwd").unwrap();
@@ -358,7 +358,7 @@ mod tests {
     fn portal_loadfile_no_peer() {
         let dir = Some(Direction::Sender);
         let pass = "test".to_string();
-        let (portal,_msg) = Portal::init(dir,pass, None);
+        let (portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
 
         // will panic due to lack of peer
         let _file_src = portal.load_file("/etc/passwd").unwrap();
