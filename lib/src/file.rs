@@ -53,12 +53,12 @@ impl PortalFile {
         }
     }
 
-    /*pub async fn process_given_chunk(&self,data: &[u8]) -> Result<PortalChunk> {
+    pub fn process_given_chunk(&self,data: &[u8]) -> Result<PortalChunk> {
         match self {
             PortalFile::Immutable(_inner) => Err(PortalError::Mutability.into()),
-            PortalFile::Mutable(inner) => {return inner.process_given_chunk(data).await;},
+            PortalFile::Mutable(inner) => {return inner.process_given_chunk(data);},
         }
-    } */
+    } 
 
     pub async fn write(&self, chunk: PortalChunk) -> Result<usize> {
         match self {
@@ -106,10 +106,10 @@ impl PortalFileMutable {
         Ok(chunk)
     }
 
-    /*async fn process_given_chunk(&self,data: &[u8]) -> Result<PortalChunk> {
+    fn process_given_chunk(&self,data: &[u8]) -> Result<PortalChunk> {
         let chunk: PortalChunk = bincode::deserialize(data)?;
         Ok(chunk)
-    } */
+    } 
 
     async fn write(&self, chunk: PortalChunk) -> Result<usize> {
         //use std::io::Write;

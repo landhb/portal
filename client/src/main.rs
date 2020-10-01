@@ -66,16 +66,16 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: TcpStream
      * Step 1: Portal Request
      */
     let req = portal.serialize()?;
-    async_std::task::block_on(async { client.write_all(&req).await });
+    async_std::task::block_on(async { client.write_all(&req).await })?;
 
     /*
      * Step 2: Portal Response/Acknowledgement of peering
      */
     log_status!("Waiting for peer to connect...");
-    let resp = match async_std::task::block_on(async { Portal::read_response_from(&mut client).await }) {
+    let resp = match Portal::read_response_from(&mut client) {
         Ok(res) => res,
-        Err(_e) => {
-            log_error!("No peer found. Try again.");
+        Err(e) => {
+            log_error!("No peer found. Try again. {}", e);
             std::process::exit(0);
         }
     };
@@ -83,10 +83,8 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: TcpStream
     /*
      * Step 3: PAKE2 msg exchange
      */
-    let confirm_msg = async_std::task::block_on(async { 
-      client.write_all(&msg).await;
-      return Portal::read_confirmation_from(&mut client).await.unwrap(); 
-    });
+    async_std::task::block_on(async {client.write_all(&msg).await.unwrap();});
+    let confirm_msg = Portal::read_confirmation_from(&mut client)?;
     
 
     /*

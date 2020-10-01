@@ -102,8 +102,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // Clear old entries before accepting, will keep
                     // connections < 15 min old
                     endpoints.borrow_mut().retain(|_, v| 
+                        !v.peer_token.is_none() || (
                         v.time_added.elapsed().unwrap().as_secs() < 
-                        std::time::Duration::from_secs(60*15).as_secs());
+                        std::time::Duration::from_secs(60*15).as_secs())); 
 
                     // If this is an event for the server, it means a connection
                     // is ready to be accepted.
@@ -153,7 +154,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             let id = req.get_id();
                             let ref_endpoints = endpoints.borrow();
                             let search = ref_endpoints.iter()
-                            .find_map(|(key, val)| if *val.id == *id { Some(key) } else { None });
+                            .find_map(|(key, val)| if *val.id == *id  { Some(key) } else { None });
 
                             let peer_token  = match search {
                                 Some(t) => t.clone(),
@@ -209,7 +210,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 time_added: SystemTime::now(),
                             };
 
-                            log!("Added sender {:?}", endpoints);
+                            log!("Added Receiver {:?}", endpoint);
 
                             ref_endpoints.entry(token).or_insert(endpoint);
 
@@ -224,10 +225,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                             let search = ref_endpoints.iter()
                             .find_map(|(key, val)| if *val.id == *id { Some(key) } else { None });
 
+                            // Kill the connection if this ID is being used by another sender
                             match search {
-                                Some(t) => t.clone(),
-                                None => {continue;}
+                                Some(_) => {continue;}
+                                None => {}
                             };
+
+                            drop(ref_endpoints);
 
                             // We need to register for READABLE events to detect a closed connection
                             let token = next(&mut unique_token);
@@ -248,7 +252,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 time_added: SystemTime::now(),
                             };
 
-                            log!("{:?}", endpoint);
+                            log!("Added Sender: {:?}", endpoint);
                             
                             endpoints.borrow_mut().entry(token).or_insert(endpoint);
 
@@ -261,7 +265,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 token => {
                     
-                    
+                    log!("event {:?} on token {:?}", event, token);
+
                     let mut ref_endpoints = endpoints.borrow_mut();
 
                     // get the client that will be performing the read/write
@@ -277,8 +282,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         Some(v) => v,
                         None => {continue;},
                     };
-
-                    log!("event {:?} on token {:?}", event, token);
 
 
                     // perform the action
