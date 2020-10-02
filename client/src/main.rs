@@ -131,6 +131,7 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
 
             assert_eq!(len as u64, fsize);
 
+            // Decrypt the file
             file.decrypt()?;
 
             pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
@@ -144,10 +145,11 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
 
             // open file read-only for sending
             let mut file = portal.load_file(fpath)?;
-            file.encrypt()?;
-            log_success!("Encrypted file!");
 
+            // Encrypt the file
+            file.encrypt()?;
             file.sync_file_state(&mut client)?;
+            log_success!("Encrypted file!");
 
             // This will be empty for files created with create_file()
             let chunks = portal.get_chunks(&file,portal::CHUNK_SIZE);

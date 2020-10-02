@@ -1,3 +1,69 @@
+//! portal-lib
+//!
+//! A small Protocol Library for [Portal](https://github.com/landhb/portal) - An encrypted file transfer utility 
+//!
+//! This crate enables a consumer to: 
+//!
+//! - Create/serialize/deserialize Portal request/response messages.
+//! - Negoticate a symmetric key with a peer using [SPAKE2](https://docs.rs/spake2/0.2.0/spake2) 
+//! - Encrypt files with [Chacha20poly1305](https://blog.cloudflare.com/it-takes-two-to-chacha-poly/) using the [RustCrypto implementation](https://github.com/rusticata/tls-parser)
+//! - Send/receive files through a Portal relay
+//!
+//!
+//! Example of SPAKE2 key negotiation:
+//!
+//! ```rust,no_run
+//! // receiver
+//! let dir = Some(Direction::Receiver);
+//! let pass ="test".to_string();
+//! let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+//!
+//! // sender
+//! let dir = Some(Direction::Sender);
+//! let pass ="test".to_string();
+//! let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+//!
+//! receiver.confirm_peer(&sender_msg).unwrap();
+//! sender.confirm_peer(&receiver_msg).unwrap();
+//!
+//! assert_eq!(receiver.key,sender.key);
+//! ```
+//!
+//! Example of Sending a file:
+//!
+//! ```rust,no_run
+//! // open file read-only for sending
+//! let mut file = portal.load_file(fpath)?;
+//!
+//! // Encrypt the file and share state 
+//! file.encrypt()?;
+//! file.sync_file_state(&mut client)?;
+//!
+//! // This will be empty for files created with create_file()
+//! let chunks = portal.get_chunks(&file,portal::CHUNK_SIZE);
+//!
+//! for data in chunks.into_iter() {
+//!     client.write_all(&data)?;
+//!     total += data.len(); 
+//! }
+//! ```
+//!
+//! Example of Receiving a file:
+//!
+//! ```rust,no_run
+//! // create outfile
+//! let mut file = portal.create_file(&fname, fsize)?;
+//!
+//! // Receive until connection is done
+//! let len = match file.download_file(&client,|x| {pb.set_position(x)})?;
+//!
+//! assert_eq!(len as u64, fsize);
+//!
+//! // Decrypt the file
+//! file.decrypt()?;
+//!
+
+
 use anyhow::Result;
 use serde::{Serialize, Deserialize};
 use std::fs::File;
@@ -217,7 +283,6 @@ impl Portal {
         PortalChunks::init(
             &data.mmap[..], // TODO: verify that this is zero-copy/move
             chunk_size,
-            //data,
         )
     }
 
@@ -293,19 +358,14 @@ mod tests {
         let chunk_size = 10;
         let chunks = sender.get_chunks(&file,chunk_size);
         for v in chunks.into_iter() {
-            // Encrypted chunk size will always be
-            // <= chunk_size + 32 + 12, because: 
-            //
-            // - ChaCha20 is a 256bit cipher = 32 bytes
-            // - The attached nonce is 12 bytes
-            assert!(v.len() <= chunk_size+32+12);
+            assert!(v.len() <= chunk_size);
         }
 
 
         let chunk_size = 1024;
         let chunks = sender.get_chunks(&file,chunk_size);
         for v in chunks.into_iter() {
-            assert!(v.len() <= chunk_size+32+12);
+            assert!(v.len() <= chunk_size);
         }
 
     }
@@ -328,7 +388,7 @@ mod tests {
 
         // TODO change test file
         let file_src = sender.load_file("/etc/passwd").unwrap();
-        let file_dst = receiver.create_file("/tmp/passwd",4096).unwrap();
+        let mut file_dst = receiver.create_file("/tmp/passwd",4096).unwrap();
 
         let chunk_size = 4096;
         let chunks = sender.get_chunks(&file_src,chunk_size);
@@ -338,7 +398,7 @@ mod tests {
             assert!(v.len() <= chunk_size+32+12);
 
             // test writing chunk
-            file_dst.process_given_chunk(&v).unwrap();
+            file_dst.write_given_chunk(&v).unwrap();
         } 
     }
 

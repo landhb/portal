@@ -3,7 +3,7 @@ use anyhow::Result;
 use memmap::MmapMut;
 use rand::Rng;
 
-
+use std::io::Write;
 use serde::{Serialize, Deserialize};
 use chacha20poly1305::{Nonce,Tag}; 
 
@@ -23,8 +23,10 @@ pub struct PortalFile {
     
     // Encryption State
     pub cipher: ChaCha20Poly1305,
-
     state: StateMetadata,
+
+    // Position
+    pos: usize,
 }
 
 #[derive(Serialize, Deserialize, PartialEq)]
@@ -42,6 +44,7 @@ impl PortalFile {
         PortalFile{
             mmap: mmap,
             cipher: cipher,
+            pos: 0,
             state: StateMetadata {
                 nonce: Vec::new(),
                 tag: Vec::new(),
@@ -96,9 +99,8 @@ impl PortalFile {
     where 
         R: std::io::Read, 
         F: Fn(u64) {
-        use std::io::Write;
+        
         let mut buf = vec![0u8;crate::CHUNK_SIZE];
-        let mut written = 0;
 
         // First deserialize the Nonce + Tag
         let remote_state: StateMetadata = bincode::deserialize_from(&mut reader)?;
@@ -109,21 +111,22 @@ impl PortalFile {
         loop {
 
             let len = match reader.read(&mut buf) {
-                Ok(0) => {return Ok(written as u64);},
+                Ok(0) => {return Ok(self.pos as u64);},
                 Ok(len) => len,
                 Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e.into()),
             };
 
-            match (&mut self.mmap[written..]).write_all(&buf[..len]) {
-                Ok(_) => {},
-                Err(_) => {
-                    println!("written: {:?} len: {:?}", written,len);
-                }
-            }
-            written += len;
-            callback(written as u64);
+            (&mut self.mmap[self.pos..]).write_all(&buf[..len])?;
+            self.pos += len;
+            callback(self.pos as u64);
         }
+    }
+
+    pub fn write_given_chunk(&mut self,data: &[u8]) -> Result<u64> {
+        (&mut self.mmap[self.pos..]).write_all(&data)?;
+        self.pos += data.len();
+        Ok(data.len() as u64)
     }
 }
 
