@@ -194,6 +194,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                   )
                   .get_matches();
 
+    // Fix terminal output on windows
+    #[cfg(target_os = "windows")]
+    control::set_virtual_terminal(true).unwrap();
 
     // Load/create config location
     let mut cfg: AppConfig = confy::load(env!("CARGO_PKG_NAME"))?;
