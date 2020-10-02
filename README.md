@@ -11,7 +11,7 @@ Securely & quickly transport your files.
 ### Client Install
 
 ```
-cargo install --git https://github.com/landhb/portal portal-client
+cargo install portal-client
 ```
 
 On the first run, a configuration file will be created in:
