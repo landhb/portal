@@ -3,6 +3,19 @@ name = "portal-client"
 version = "0.1.0"
 authors = ["landhb <landhb@github>"]
 edition = "2018"
+description = """
+A Secure file transfer utility, written in Rust. The protocol utilizes 
+SPAKE2 for key negotiation over an insecure channel, and ChaCha20Poly1305 
+Authenticated Encryption to encrypt the file with the derived shared symmetric
+key. This enables two peers to transfer a file over any channel without needing
+to trust the intermediary relay.
+"""
+keywords = ["file-transfer", "spake2", "chacha20", "poly1305","wormhole"]
+homepage = "https://github.com/landhb/portal"
+documentation = "https://docs.rs/portal-client"
+repository = "https://github.com/landhb/portal"
+readme = "README.md"
+license = "Apache-2.0 OR MIT"
 
 [[bin]]
 name="portal"
@@ -11,7 +24,7 @@ path="src/main.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-portal-lib = { path = "../lib" }
+portal-lib = {path ="../lib",version = "0.1.0"}
 anyhow = "1.0.32"
 clap = "2.33.3"
 rpassword = "5.0.0"
