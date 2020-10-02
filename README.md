@@ -72,6 +72,11 @@ cargo run --bin portal -- recv
 cargo run --bin portal -- send [FILE]
 ```
 
+### Acknowledgements:
+
+- This tool works extremely similarly to Wormhole written by [Brian Warner](https://github.com/warner), he actually also contributed a large amount to the [RustCrypto project's SPAKE2 implementation](https://github.com/RustCrypto/PAKEs/tree/master/spake2) that Portal uses. 
+
+
 [//]: # (badges)
 [license-image]: https://img.shields.io/badge/license-Apache2.0/MIT-blue.svg
 [rustc-image]: https://img.shields.io/badge/rustc-1.41+-blue.svg
