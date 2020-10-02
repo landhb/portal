@@ -79,14 +79,6 @@ impl PortalFile {
     }
 
 
-    /*pub fn send_file<W,F>(&mut self, mut writer: W,callback: F) -> Result<usize> 
-    where 
-        W: std::io::Write, 
-        F: Fn(u64) {
-
-        Ok(0)
-    } */
-
     pub fn sync_file_state<W>(&mut self, mut writer: W) -> Result<usize> 
     where 
         W: std::io::Write {

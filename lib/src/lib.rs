@@ -61,7 +61,7 @@
 //!
 //! // Decrypt the file
 //! file.decrypt()?;
-//!
+//! ```
 
 
 use anyhow::Result;
@@ -136,7 +136,7 @@ impl Portal {
                 mut filename: Option<String>) -> (Portal,Vec<u8>) {
 
         
-        // use password to compute ID string
+        // hash the ID string
         let mut hasher = Sha256::new();
         hasher.update(&id);
         let id_bytes = hasher.finalize();
@@ -335,9 +335,26 @@ mod tests {
         assert_eq!(receiver.key,sender.key);
     }
 
+    #[test]
+    fn portal_load_file() {
+        let dir = Some(Direction::Receiver);
+        let pass ="test".to_string();
+        let (_receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+
+        // sender
+        let dir = Some(Direction::Sender);
+        let pass ="test".to_string();
+        let (mut sender,_sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+
+        // Confirm
+        sender.confirm_peer(&receiver_msg).unwrap();
+
+        // TODO change test file
+        let _file = sender.load_file("/etc/passwd").unwrap();
+    }
 
     #[test]
-    fn portalfile_iterator() {
+    fn portalfile_chunks_iterator() {
         
         // receiver
         let dir = Some(Direction::Receiver);
@@ -387,6 +404,26 @@ mod tests {
         receiver.confirm_peer(&sender_msg).unwrap();
 
         // TODO change test file
+        let _file_dst = receiver.create_file("/tmp/passwd",4096).unwrap();
+    }
+
+    #[test]
+    fn portal_write_chunk() {
+        // receiver
+        let dir = Some(Direction::Receiver);
+        let pass ="test".to_string();
+        let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+
+        // sender
+        let dir = Some(Direction::Sender);
+        let pass ="test".to_string();
+        let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+
+        // Confirm
+        sender.confirm_peer(&receiver_msg).unwrap();
+        receiver.confirm_peer(&sender_msg).unwrap();
+
+        // TODO change test file
         let file_src = sender.load_file("/etc/passwd").unwrap();
         let mut file_dst = receiver.create_file("/tmp/passwd",4096).unwrap();
 
@@ -395,13 +432,12 @@ mod tests {
 
         for v in chunks.into_iter() {
 
-            assert!(v.len() <= chunk_size+32+12);
+            assert!(v.len() <= chunk_size);
 
             // test writing chunk
             file_dst.write_given_chunk(&v).unwrap();
         } 
     }
-
 
     #[test]
     #[should_panic]
