@@ -131,6 +131,8 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
 
             assert_eq!(len as u64, fsize);
 
+            file.decrypt()?;
+
             pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
         }
         false => {
