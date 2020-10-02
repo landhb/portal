@@ -10,7 +10,7 @@ Authenticated Encryption to encrypt the file with the derived shared symmetric
 key. This enables two peers to transfer a file over any channel without needing
 to trust the intermediary relay.
 """
-keywords = ["file-transfer", "spake", "spake2", "aead","chacha20", "poly1305","networking", "wormhole"]
+keywords = ["file-transfer", "spake2", "chacha20", "poly1305","wormhole"]
 homepage = "https://github.com/landhb/portal"
 documentation = "https://docs.rs/portal-lib"
 repository = "https://github.com/landhb/portal"
