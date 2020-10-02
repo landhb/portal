@@ -6,7 +6,7 @@ Securely & quickly transport your files.
 ### Client Install
 
 ```
-cargo install portal
+cargo install --git https://github.com/landhb/portal portal-client
 ```
 
 On the first run, a configuration file will be created in:
@@ -18,14 +18,28 @@ On the first run, a configuration file will be created in:
 | Windows | `{FOLDERID_RoamingAppData}`           | C:\Users\Alice\AppData\Roaming\portal           |
 
 
-Note: The default relay is `portal-relay.landhb.dev`.
+Note: The default relay is `portal-relay.landhb.dev`. Your peer must connect to the same portal-relay as you. You can change the relay to any domain/IP address in your config.
+
+
+To send a file: 
+
+```bash
+portal send /path/to/file
+```
+
+To receive a file:
+
+```bash
+portal recv
+```
+
 
 ### Relay Install
 
 If you wish to run your own relay, you can install the binary on a server with:
 
 ```
-cargo install portal-relay
+cargo install --git https://github.com/landhb/portal portal-relay
 ```
 
 Note: An example service file is included in the `relay/` directory.
