@@ -77,7 +77,6 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
             std::process::exit(0);
         }
     };
-    log_success!("Peer connected.");
 
     /*
      * Step 3: PAKE2 msg exchange
@@ -119,13 +118,18 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
             pb.set_style(pstyle);
 
             // create outfile
-            let file = portal.create_file(&fname)?;
+            let mut file = portal.create_file(&fname, fsize)?;
 
             // Receive until connection is done
-            while let Ok(len) = file.process_next_chunk(&client) {
-                total += len;
-                pb.set_position(total as u64);
-            }
+            let len = match file.download_file(&client,|x| {pb.set_position(x)}) {
+                Ok(n) => n,
+                Err(e) => {
+                  log_error!("download failed: {:?}",e);
+                  std::process::exit(-1);
+                }
+            };
+
+            assert_eq!(len as u64, fsize);
 
             pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
         }
@@ -137,15 +141,18 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
             pb.set_style(pstyle);
 
             // open file read-only for sending
-            let file = portal.load_file(fpath)?;
+            let mut file = portal.load_file(fpath)?;
+            file.encrypt()?;
+            log_success!("Encrypted file!");
+
+            file.sync_file_state(&mut client)?;
 
             // This will be empty for files created with create_file()
-            let csize = 16384;
-            let chunks = portal.get_chunks(&file,csize);
+            let chunks = portal.get_chunks(&file,portal::CHUNK_SIZE);
 
             for data in chunks.into_iter() {
                 client.write_all(&data)?;
-                total += csize; 
+                total += portal::CHUNK_SIZE; 
                 pb.set_position(total as u64);
             }
 
@@ -196,8 +203,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             ips[0]
         }
     };
-
-    log_success!("Resolved relay to {:?} port {}!", addr, cfg.relay_port);
     
     let addr: std::net::SocketAddr = format!("{}:{}",addr, cfg.relay_port).parse()?;
 

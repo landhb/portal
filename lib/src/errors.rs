@@ -15,6 +15,8 @@ pub enum PortalError {
     NoPeer,
     #[error("KeyDerivationFailed")]
     BadMsg,
+    #[error("EncryptError")]
+    EncryptError,
     #[error("Interrupted")]
     Interrupted,
     #[error("WouldBlock")]

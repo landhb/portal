@@ -1,114 +1,129 @@
+use chacha20poly1305::ChaCha20Poly1305;
 use anyhow::Result;
-use memmap::Mmap;
-use std::cell::RefCell;
-use serde::{Serialize, Deserialize};
-use chacha20poly1305::Nonce; 
-use chacha20poly1305::aead::Aead;
+use memmap::MmapMut;
+use rand::Rng;
 
-use crate::PortalEncryptState;
+
+use serde::{Serialize, Deserialize};
+use chacha20poly1305::{Nonce,Tag}; 
+
+
 use crate::errors::PortalError;
+
+use chacha20poly1305::aead::AeadInPlace;
 
 
 /**
  * A file mapping, either an immutable mmap 
  * or a mutable std::fs::File wrapped in a RefCell
  */
-pub enum PortalFile {
-    Immutable(PortalFileImmutable),
-    Mutable(PortalFileMutable),
-}
+pub struct PortalFile {
+    // Memory mapped file
+    pub mmap: MmapMut,
+    
+    // Encryption State
+    pub cipher: ChaCha20Poly1305,
 
-pub struct PortalFileImmutable {
-    mmap: Mmap,
-    pub state: PortalEncryptState,
-}
-
-pub struct PortalFileMutable {
-    file: RefCell<std::fs::File>,
-    pub state: PortalEncryptState,
+    state: StateMetadata,
 }
 
 #[derive(Serialize, Deserialize, PartialEq)]
-pub struct PortalChunk {
-    pub nonce: Vec<u8>,
-    pub data: Vec<u8>,
+struct StateMetadata {
+    nonce: Vec<u8>,
+    tag: Vec<u8>,
 }
+
 
 
 impl PortalFile {
 
-    pub fn get_bytes(&self) -> Result<&[u8]> {
-        match self {
-            PortalFile::Immutable(inner) => Ok(&inner.mmap[..]),
-            PortalFile::Mutable(_inner) => Err(PortalError::Mutability.into()),
-        }
-    }
 
-    pub fn process_next_chunk<R>(&self,reader: R) -> Result<usize> 
-    where
-        R: std::io::Read {
-        match self {
-            PortalFile::Immutable(_inner) => Err(PortalError::Mutability.into()),
-            PortalFile::Mutable(inner) => {return inner.process_next_chunk(reader);},
-        }
-    }
-
-    pub fn process_given_chunk(&self,data: &[u8]) -> Result<usize> {
-        match self {
-            PortalFile::Immutable(_inner) => Err(PortalError::Mutability.into()),
-            PortalFile::Mutable(inner) => {return inner.process_given_chunk(data);},
-        }
-    }
-}
-
-impl PortalFileImmutable {
-    pub fn init(mmap: Mmap, state: PortalEncryptState) -> PortalFileImmutable {
-        PortalFileImmutable{
+    pub fn init(mmap: MmapMut, cipher: ChaCha20Poly1305) -> PortalFile {
+        PortalFile{
             mmap: mmap,
-            state: state,
-        }
-    }
-}
-
-
-impl PortalFileMutable {
-
-    pub fn init(file: std::fs::File, state: PortalEncryptState) -> PortalFileMutable {
-        PortalFileMutable{
-            file: RefCell::new(file),
-            state: state,
+            cipher: cipher,
+            state: StateMetadata {
+                nonce: Vec::new(),
+                tag: Vec::new(),
+            }
         }
     }
 
+    pub fn encrypt(&mut self) -> Result<()> {
 
-    fn process_next_chunk<R>(&self,reader: R) -> Result<usize>
+        // Generate random nonce
+        let mut rng = rand::thread_rng();
+        let rbytes  = rng.gen::<[u8;12]>();
+        let nonce = Nonce::from_slice(&rbytes); // 128-bits; unique per chunk
+        self.state.nonce.extend(nonce);
+
+        let tag = match self.cipher.encrypt_in_place_detached(nonce, b"", &mut self.mmap[..]) {
+            Ok(tag) => tag,
+            Err(_e) => {return Err(PortalError::EncryptError.into())},
+        };
+        self.state.tag.extend(tag);
+        Ok(())
+
+    }
+
+    pub fn decrypt(&mut self) -> Result<()> {
+        let nonce = Nonce::from_slice(&self.state.nonce);
+        let tag = Tag::from_slice(&self.state.tag);
+        match self.cipher.decrypt_in_place_detached(nonce, b"", &mut self.mmap[..], &tag) {
+            Ok(_) => {Ok(())},
+            Err(_e) => {Err(PortalError::EncryptError.into())},
+        }
+    }
+
+
+    /*pub fn send_file<W,F>(&mut self, mut writer: W,callback: F) -> Result<usize> 
     where 
-        R: std::io::Read {
-        let chunk: PortalChunk = bincode::deserialize_from::<R,PortalChunk>(reader)?;
-        Ok(self.write(chunk)?)
+        W: std::io::Write, 
+        F: Fn(u64) {
+
+        Ok(0)
+    } */
+
+    pub fn sync_file_state<W>(&mut self, mut writer: W) -> Result<usize> 
+    where 
+        W: std::io::Write {
+        let data: Vec<u8> = bincode::serialize(&self.state)?;
+        writer.write_all(&data)?;
+        Ok(0)
     }
 
-    fn process_given_chunk(&self,data: &[u8]) -> Result<usize> {
-        let chunk: PortalChunk = bincode::deserialize(data)?;
-        Ok(self.write(chunk)?)
-    }
-
-    fn write(&self, chunk: PortalChunk) -> Result<usize> {
+    pub fn download_file<R,F>(&mut self,mut reader: R, callback: F) -> Result<u64>
+    where 
+        R: std::io::Read, 
+        F: Fn(u64) {
         use std::io::Write;
-        let nonce = Nonce::from_slice(&chunk.nonce[..]);
-        let dec_data = self.state.cipher.decrypt(nonce,&chunk.data[..]).expect("decryption failure!");
-        self.file.borrow_mut().write_all(&dec_data)?;
-        Ok(chunk.data.len())
-    } 
+        let mut buf = vec![0u8;crate::CHUNK_SIZE];
+        let mut written = 0;
 
+        // First deserialize the Nonce + Tag
+        let remote_state: StateMetadata = bincode::deserialize_from(&mut reader)?;
+        self.state.nonce.extend(&remote_state.nonce);
+        self.state.tag.extend(&remote_state.tag);
+
+        // Anything else is file data
+        loop {
+
+            let len = match reader.read(&mut buf) {
+                Ok(0) => {return Ok(written as u64);},
+                Ok(len) => len,
+                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e.into()),
+            };
+
+            match (&mut self.mmap[written..]).write_all(&buf[..len]) {
+                Ok(_) => {},
+                Err(_) => {
+                    println!("written: {:?} len: {:?}", written,len);
+                }
+            }
+            written += len;
+            callback(written as u64);
+        }
+    }
 }
 
-
-impl Drop for PortalFileMutable {
-
-    // attempt to flush to disk
-    fn drop(&mut self) {
-        let _ = self.file.get_mut().sync_all();
-    }
-
-} 

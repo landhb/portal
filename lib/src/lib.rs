@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Serialize, Deserialize};
 use std::fs::File;
-use memmap::Mmap;
+use memmap::MmapOptions;
 use std::fs::OpenOptions;
 
 // Key Exchange
@@ -18,10 +18,12 @@ mod chunks;
 
 
 use errors::PortalError;
-use file::{PortalFile,PortalFileImmutable,PortalFileMutable};
+use file::PortalFile;
 use chunks::PortalChunks;
 
 pub const DEFAULT_PORT: u16 = 13265;
+pub const CHUNK_SIZE: usize = 65535;
+
 
 /**
  * The primary interface into the library
@@ -48,9 +50,6 @@ pub struct Portal{
     key: Option<Vec<u8>>,
 }
 
-pub struct PortalEncryptState {
-    cipher: ChaCha20Poly1305,
-}
 
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -167,23 +166,23 @@ impl Portal {
      */
     pub fn load_file<'a>(&'a self, f: &str) -> Result<PortalFile>  {
         let file = File::open(f)?;
-        let mmap = unsafe { Mmap::map(&file)?  };
+        let mmap = unsafe { MmapOptions::new().map_copy(&file)? };
 
         let key = self.key.as_ref().ok_or_else(|| PortalError::NoPeer)?;
         let cha_key = Key::from_slice(&key[..]);
 
-        let state = PortalEncryptState {
-            cipher: ChaCha20Poly1305::new(cha_key),
-        };
+        let cipher = ChaCha20Poly1305::new(cha_key);
+        
 
-        Ok(PortalFile::Immutable(PortalFileImmutable::init(mmap,state)))
+        //Ok(PortalFile::Immutable(PortalFileImmutable::init(mmap,state)))
+        Ok(PortalFile::init(mmap,cipher))
     }
 
 
     /*
      * mmap's a file into memory for writing
      */
-    pub fn create_file<'a>(&'a self, f: &str) -> Result<PortalFile>  {
+    pub fn create_file<'a>(&'a self, f: &str, size: u64) -> Result<PortalFile>  {
 
         let file = OpenOptions::new()
                        .read(true)
@@ -191,15 +190,21 @@ impl Portal {
                        .create(true)
                        .open(&f)?;
 
+        file.set_len(size)?;
+
         let key = self.key.as_ref().ok_or_else(|| PortalError::NoPeer)?;
+
+
+        let mmap = unsafe {
+            MmapOptions::new().map_mut(&file)?
+        };
 
         let cha_key = Key::from_slice(&key[..]);
 
-        let state = PortalEncryptState {
-            cipher: ChaCha20Poly1305::new(cha_key),
-        };
+        let cipher = ChaCha20Poly1305::new(cha_key);
 
-        Ok(PortalFile::Mutable(PortalFileMutable::init(file,state)))
+        //Ok(PortalFile::Mutable(PortalFileMutable::init(file,state)))
+        Ok(PortalFile::init(mmap,cipher))
     }
 
     /**
@@ -207,16 +212,12 @@ impl Portal {
      * network
      */
     pub fn get_chunks<'a>(&self, data: &'a PortalFile, chunk_size: usize) -> PortalChunks<'a,u8> {
-        
-        let bytes = match data.get_bytes() {
-            Ok(data) => data,
-            Err(_) => &[], // iterator will be empty for writer files
-        };
+
 
         PortalChunks::init(
-            &bytes, // TODO: verify that this is zero-copy/move
+            &data.mmap[..], // TODO: verify that this is zero-copy/move
             chunk_size,
-            data,
+            //data,
         )
     }
 
@@ -293,7 +294,7 @@ mod tests {
         let chunks = sender.get_chunks(&file,chunk_size);
         for v in chunks.into_iter() {
             // Encrypted chunk size will always be
-            // chunk_size + 32 + 12, because: 
+            // <= chunk_size + 32 + 12, because: 
             //
             // - ChaCha20 is a 256bit cipher = 32 bytes
             // - The attached nonce is 12 bytes
@@ -327,14 +328,14 @@ mod tests {
 
         // TODO change test file
         let file_src = sender.load_file("/etc/passwd").unwrap();
-        let file_dst = receiver.create_file("/tmp/passwd").unwrap();
+        let file_dst = receiver.create_file("/tmp/passwd",4096).unwrap();
 
         let chunk_size = 4096;
         let chunks = sender.get_chunks(&file_src,chunk_size);
 
         for v in chunks.into_iter() {
 
-             assert!(v.len() <= chunk_size+32+12);
+            assert!(v.len() <= chunk_size+32+12);
 
             // test writing chunk
             file_dst.process_given_chunk(&v).unwrap();
@@ -350,7 +351,7 @@ mod tests {
         let (portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
 
         // will panic due to lack of peer
-        let _file_dst = portal.create_file("/tmp/passwd").unwrap();
+        let _file_dst = portal.create_file("/tmp/passwd",4096).unwrap();
     }
 
     #[test]
