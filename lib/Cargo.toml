@@ -30,4 +30,3 @@ sha2 = "0.9.1"
 hex = "0.4.2"
 chacha20poly1305 = {version="0.6.0",features=["heapless"]}
 rand = "0.7.3"
-async-std = "1.6.5"
