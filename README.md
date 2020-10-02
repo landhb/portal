@@ -1,10 +1,10 @@
 
 ## Portal 
 
-[![crates.io](https://img.shields.io/crates/v/ja3.svg)](https://crates.io/crates/portal-lib)
-[![Documentation](https://docs.rs/ja3/badge.svg)](https://docs.rs/portal-lib)
-[![license](https://img.shields.io/badge/license-Apache2.0/MIT-blue.svg)]
-[![Rust Version](https://img.shields.io/badge/rustc-1.46+-blue.svg])]
+[![crates.io](https://img.shields.io/crates/v/portal-lib.svg)](https://crates.io/crates/portal-lib)
+[![Documentation](https://docs.rs/portal-lib/badge.svg)](https://docs.rs/portal-lib)
+![Apache2/MIT licensed][license-image]
+![Rust Version][rustc-image]
 
 Securely & quickly transport your files.
 
@@ -71,3 +71,7 @@ cargo run --bin portal -- recv
 # window 3
 cargo run --bin portal -- send [FILE]
 ```
+
+[//]: # (badges)
+[license-image]: https://img.shields.io/badge/license-Apache2.0/MIT-blue.svg
+[rustc-image]: https://img.shields.io/badge/rustc-1.41+-blue.svg
