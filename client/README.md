@@ -24,3 +24,6 @@ portal send /path/to/file
 portal recv
 ```
 
+### Diagram of Key Derivation
+
+![Demo](https://raw.githubusercontent.com/landhb/portal/master/img/key-derivation.png?raw=true)
