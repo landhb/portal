@@ -1,5 +1,10 @@
 
-## Portal
+## Portal 
+
+[![crates.io](https://img.shields.io/crates/v/ja3.svg)](https://crates.io/crates/portal-lib)
+[![Documentation](https://docs.rs/ja3/badge.svg)](https://docs.rs/portal-lib)
+[![license](https://img.shields.io/badge/license-Apache2.0/MIT-blue.svg)]
+[![Rust Version](https://img.shields.io/badge/rustc-1.46+-blue.svg])]
 
 Securely & quickly transport your files.
 
