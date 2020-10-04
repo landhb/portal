@@ -79,16 +79,23 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
     };
 
     /*
-     * Step 3: PAKE2 msg exchange
+     * Step 3: PAKE2 msg exchange + key derivation
      */
     client.write_all(&msg)?;
     let confirm_msg = Portal::read_confirmation_from(&mut client)?;
+    match portal.derive_key(&confirm_msg) {
+        Ok(_) => {},
+        Err(_) => {
+            log_error!("Incorrect channel ID or peer disconnected. Try again.");
+            std::process::exit(0);
+        }
+    }
 
 
     /*
-     * Step 4: Key derivation
+     * Step 4: Key confirmation
      */
-    match portal.confirm_peer(&confirm_msg) {
+    match portal.confirm_peer(&mut client) {
         Ok(_) => {log_success!("Peer confirmed!");},
         Err(_) => {
             log_error!("Incorrect pass-phrase or peer disconnected. Try again.");
@@ -170,7 +177,7 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
 
 fn main() -> Result<(), Box<dyn Error>> {
 
-    let matches = App::new(env!("CARGO_PKG_NAME"))
+    let matches = App::new("portal")
                   .version(env!("CARGO_PKG_VERSION"))
                   .author(env!("CARGO_PKG_AUTHORS"))
                   .about("Quick & Safe File Transfers")
@@ -199,7 +206,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     control::set_virtual_terminal(true).unwrap();
 
     // Load/create config location
-    let mut cfg: AppConfig = confy::load(env!("CARGO_PKG_NAME"))?;
+    let mut cfg: AppConfig = confy::load("portal")?; // CARGO_BIN_NAME is nightly only
     log_status!("Using portal.toml config, relay: {}!", cfg.relay_host.yellow());
 
     // Determin the IP address to connect to
@@ -232,7 +239,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let file = args.value_of("filename").unwrap();
 
             let (mut req,msg) = Portal::init(
-                Some(portal::Direction::Sender),
+                portal::Direction::Sender,
                 id,
                 pass,
                 Some(file.to_string()),
@@ -260,7 +267,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let opass = pass.collect::<Vec<&str>>().join("-");
 
             let (req,msg) = Portal::init(
-                Some(portal::Direction::Receiver),
+                portal::Direction::Receiver,
                 id,
                 opass,
                 None, // receiver will get the filename from the sender

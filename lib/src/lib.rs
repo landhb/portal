@@ -69,6 +69,7 @@ use serde::{Serialize, Deserialize};
 use std::fs::File;
 use memmap::MmapOptions;
 use std::fs::OpenOptions;
+use hkdf::Hkdf;
 
 // Key Exchange
 use spake2::{Ed25519Group, Identity, Password, SPAKE2,Group};
@@ -100,7 +101,7 @@ pub struct Portal{
     // Information to correlate
     // connections on the relay
     id: String,
-    direction: Option<Direction>,
+    direction: Direction,
 
     // Metadata to be exchanged
     // between peers
@@ -124,13 +125,24 @@ pub enum Direction {
     Receiver,
 }
 
+fn compare_key_derivations(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+    for (ai, bi) in a.iter().zip(b.iter()) {
+        match ai.cmp(&bi) {
+            std::cmp::Ordering::Equal => continue,
+            ord => return ord
+        }
+    }
+
+    /* if every single element was equal, compare length */
+    a.len().cmp(&b.len())
+}
 
 impl Portal {
     
     /**
      * Initialize 
      */
-    pub fn init(direction: Option<Direction>, 
+    pub fn init(direction: Direction, 
                 id: String,
                 password: String,
                 mut filename: Option<String>) -> (Portal,Vec<u8>) {
@@ -181,7 +193,7 @@ impl Portal {
        R: std::io::Read {
         assert_eq!(33,Portal::get_peer_msg_size());
         let mut res = [0u8;33];
-        reader.read(&mut res)?;
+        reader.read_exact(&mut res)?;
         Ok(res)
     }
 
@@ -215,7 +227,7 @@ impl Portal {
         &self.id
     }
 
-    pub fn get_direction(&self) -> Option<Direction> {
+    pub fn get_direction(&self) -> Direction {
         self.direction.clone()
     }
 
@@ -223,7 +235,7 @@ impl Portal {
         self.id = id;
     }
 
-    pub fn set_direction(&mut self, direction: Option<Direction>) {
+    pub fn set_direction(&mut self, direction: Direction) {
         self.direction = direction;
     }
 
@@ -239,8 +251,6 @@ impl Portal {
 
         let cipher = ChaCha20Poly1305::new(cha_key);
         
-
-        //Ok(PortalFile::Immutable(PortalFileImmutable::init(mmap,state)))
         Ok(PortalFile::init(mmap,cipher))
     }
 
@@ -269,7 +279,6 @@ impl Portal {
 
         let cipher = ChaCha20Poly1305::new(cha_key);
 
-        //Ok(PortalFile::Mutable(PortalFileMutable::init(file,state)))
         Ok(PortalFile::init(mmap,cipher))
     }
 
@@ -278,16 +287,18 @@ impl Portal {
      * network
      */
     pub fn get_chunks<'a>(&self, data: &'a PortalFile, chunk_size: usize) -> PortalChunks<'a,u8> {
-
-
         PortalChunks::init(
             &data.mmap[..], // TODO: verify that this is zero-copy/move
             chunk_size,
         )
     }
 
-
-    pub fn confirm_peer(&mut self, msg_data: &[u8]) -> Result<()> {
+    /**
+     * Derive a shared key with the exchanged data
+     * at this point in the exchange we have not verified that our peer
+     * has derived the same key as us
+     */
+    pub fn derive_key(&mut self, msg_data: &[u8]) -> Result<()> {
 
         // after calling finish() the SPAKE2 struct will be consumed
         // so we must replace the value stored in self.state
@@ -301,6 +312,54 @@ impl Portal {
         };
 
         Ok(())
+    }
+
+    
+
+    /**
+     * Confirm that the peer has derived the same key
+     */
+    pub fn confirm_peer<R>(&mut self, mut client: R) -> Result<()>
+    where
+       R: std::io::Read + std::io::Write {
+
+        let key = self.key.as_ref().ok_or_else(|| PortalError::NoPeer)?;
+
+        let sender_info = format!("{}-{}",self.id,"senderinfo");
+        let receiver_info = format!("{}-{}",self.id,"receiverinfo");
+
+        // Perform key confirmation step
+        let h = Hkdf::<Sha256>::new(None,&key);
+        let mut peer_msg = [0u8;42];
+        let mut sender_confirm = [0u8; 42];
+        let mut receiver_confirm = [0u8; 42];
+        h.expand(&sender_info.as_bytes(), &mut sender_confirm).unwrap();
+        h.expand(&receiver_info.as_bytes(), &mut receiver_confirm).unwrap();
+
+
+        match self.direction {
+            Direction::Sender => {
+                client.write_all(&sender_confirm)?;
+                client.read_exact(&mut peer_msg)?;
+
+                if compare_key_derivations(&peer_msg,&receiver_confirm) == std::cmp::Ordering::Equal {
+                    return Ok(());
+                }
+
+                Err(PortalError::BadMsg.into())
+            }
+            Direction::Receiver => {
+                client.write_all(&receiver_confirm)?;
+                client.read_exact(&mut peer_msg)?;
+
+                if compare_key_derivations(&peer_msg,&sender_confirm) == std::cmp::Ordering::Equal {
+                    return Ok(());
+                }
+
+                return Err(PortalError::BadMsg.into());
+            }
+        }
+
     }
 
     fn get_peer_msg_size() -> usize {
