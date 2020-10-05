@@ -12,26 +12,37 @@
 //!
 //! Example of SPAKE2 key negotiation:
 //!
-//! ```rust,no_run
+//! ```no_run
+//! use portal_lib::{Portal,Direction};
+//!
 //! // receiver
-//! let dir = Some(Direction::Receiver);
+//! let dir = Direction::Receiver;
 //! let pass ="test".to_string();
 //! let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
 //!
 //! // sender
-//! let dir = Some(Direction::Sender);
+//! let dir = Direction::Sender;
 //! let pass ="test".to_string();
 //! let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 //!
-//! receiver.confirm_peer(&sender_msg).unwrap();
-//! sender.confirm_peer(&receiver_msg).unwrap();
+//! receiver.derive_key(&sender_msg).unwrap();
+//! sender.derive_key(&receiver_msg).unwrap();
 //!
-//! assert_eq!(receiver.key,sender.key);
+//! // assert_eq!(receiver.key,sender.key);
 //! ```
 //!
 //! Example of Sending a file:
 //!
-//! ```rust,no_run
+//! ```ignore
+//! use portal_lib::{Portal,Direction};
+//!
+//! // sender
+//! let dir = Direction::Sender;
+//! let pass ="test".to_string();
+//! let (mut portal,msg) = Portal::init(dir,"id".to_string(),pass,None);
+//!
+//! // complete key derivation + peer verification
+//!
 //! // open file read-only for sending
 //! let mut file = portal.load_file(fpath)?;
 //!
@@ -50,12 +61,21 @@
 //!
 //! Example of Receiving a file:
 //!
-//! ```rust,no_run
+//! ```ignore
+//! use portal_lib::{Portal,Direction};
+//!
+//! // receiver
+//! let dir = Direction::Receiver;
+//! let pass ="test".to_string();
+//! let (mut portal,msg) = Portal::init(dir,"id".to_string(),pass,None);
+//!
+//! // complete key derivation + peer verification
+//!
 //! // create outfile
 //! let mut file = portal.create_file(&fname, fsize)?;
 //!
 //! // Receive until connection is done
-//! let len = match file.download_file(&client,|x| {pb.set_position(x)})?;
+//! let len = file.download_file(&client,|x| {pb.set_position(x)})?;
 //!
 //! assert_eq!(len as u64, fsize);
 //!
@@ -250,7 +270,7 @@ impl Portal {
         let cha_key = Key::from_slice(&key[..]);
 
         let cipher = ChaCha20Poly1305::new(cha_key);
-        
+
         Ok(PortalFile::init(mmap,cipher))
     }
 
@@ -379,34 +399,34 @@ mod tests {
     fn key_derivation() {
 
         // receiver
-        let dir = Some(Direction::Receiver);
+        let dir = Direction::Receiver;
         let pass ="test".to_string();
         let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // sender
-        let dir = Some(Direction::Sender);
+        let dir = Direction::Sender;
         let pass ="test".to_string();
         let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
-        receiver.confirm_peer(&sender_msg).unwrap();
-        sender.confirm_peer(&receiver_msg).unwrap();
+        receiver.derive_key(&sender_msg).unwrap();
+        sender.derive_key(&receiver_msg).unwrap();
 
         assert_eq!(receiver.key,sender.key);
     }
 
     #[test]
     fn portal_load_file() {
-        let dir = Some(Direction::Receiver);
+        let dir = Direction::Receiver;
         let pass ="test".to_string();
         let (_receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // sender
-        let dir = Some(Direction::Sender);
+        let dir = Direction::Sender;
         let pass ="test".to_string();
         let (mut sender,_sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // Confirm
-        sender.confirm_peer(&receiver_msg).unwrap();
+        sender.derive_key(&receiver_msg).unwrap();
 
         // TODO change test file
         let _file = sender.load_file("/etc/passwd").unwrap();
@@ -416,17 +436,17 @@ mod tests {
     fn portalfile_chunks_iterator() {
         
         // receiver
-        let dir = Some(Direction::Receiver);
+        let dir = Direction::Receiver;
         let pass ="test".to_string();
         let (_receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // sender
-        let dir = Some(Direction::Sender);
+        let dir = Direction::Sender;
         let pass ="test".to_string();
         let (mut sender,_sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // Confirm
-        sender.confirm_peer(&receiver_msg).unwrap();
+        sender.derive_key(&receiver_msg).unwrap();
 
         // TODO change test file
         let file = sender.load_file("/etc/passwd").unwrap();
@@ -449,18 +469,18 @@ mod tests {
     #[test]
     fn portal_createfile() {
         // receiver
-        let dir = Some(Direction::Receiver);
+        let dir = Direction::Receiver;
         let pass ="test".to_string();
         let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // sender
-        let dir = Some(Direction::Sender);
+        let dir = Direction::Sender;
         let pass ="test".to_string();
         let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // Confirm
-        sender.confirm_peer(&receiver_msg).unwrap();
-        receiver.confirm_peer(&sender_msg).unwrap();
+        sender.derive_key(&receiver_msg).unwrap();
+        receiver.derive_key(&sender_msg).unwrap();
 
         // TODO change test file
         let _file_dst = receiver.create_file("/tmp/passwd",4096).unwrap();
@@ -469,18 +489,18 @@ mod tests {
     #[test]
     fn portal_write_chunk() {
         // receiver
-        let dir = Some(Direction::Receiver);
+        let dir = Direction::Receiver;
         let pass ="test".to_string();
         let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // sender
-        let dir = Some(Direction::Sender);
+        let dir = Direction::Sender;
         let pass ="test".to_string();
         let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // Confirm
-        sender.confirm_peer(&receiver_msg).unwrap();
-        receiver.confirm_peer(&sender_msg).unwrap();
+        sender.derive_key(&receiver_msg).unwrap();
+        receiver.derive_key(&sender_msg).unwrap();
 
         // TODO change test file
         let file_src = sender.load_file("/etc/passwd").unwrap();
@@ -501,7 +521,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portal_createfile_no_peer() {
-        let dir = Some(Direction::Sender);
+        let dir = Direction::Sender;
         let pass = "test".to_string();
         let (portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
 
@@ -512,7 +532,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portal_loadfile_no_peer() {
-        let dir = Some(Direction::Sender);
+        let dir = Direction::Sender;
         let pass = "test".to_string();
         let (portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
 
