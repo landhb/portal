@@ -25,7 +25,6 @@ pub struct Endpoint {
     id: String,
     dir: portal::Direction,
     stream: TcpStream,
-    writable: bool,
     peer_writer: Option<PipeWriter>,
     peer_reader: Option<PipeReader>,
     peer_token: Option<Token>,
@@ -59,6 +58,7 @@ fn daemonize() -> Result<(),daemonize::DaemonizeError> {
 
     daemonize.start()
 }
+
 
 fn main() -> Result<(), Box<dyn Error>> {
 
@@ -99,13 +99,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 SERVER => loop {
 
-                    // Clear old entries before accepting, will keep
-                    // connections < 15 min old
-                    endpoints.borrow_mut().retain(|_, v| 
-                        !v.peer_token.is_none() || (
-                        v.time_added.elapsed().unwrap().as_secs() < 
-                        std::time::Duration::from_secs(60*15).as_secs())); 
-
+                   
                     // If this is an event for the server, it means a connection
                     // is ready to be accepted.
                     let (mut connection, _addr) = match server.accept() {
@@ -148,7 +142,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     match req.get_direction() {
 
-                        Some(portal::Direction::Receiver) => {
+                        portal::Direction::Receiver => {
 
                             // Lookup Sender token
                             let id = req.get_id();
@@ -201,9 +195,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                             // create this endpoint
                             let endpoint = Endpoint {
                                 id: id.to_string(),
-                                dir: req.get_direction().unwrap(),
+                                dir: req.get_direction(),
                                 stream: connection,
-                                writable: true,
                                 peer_reader: old_reader,
                                 peer_writer: Some(writer2), //None,
                                 peer_token: Some(peer_token),
@@ -215,7 +208,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             ref_endpoints.entry(token).or_insert(endpoint);
 
                         }
-                        Some(portal::Direction::Sender) => {
+                        portal::Direction::Sender => {
 
                             /*
                              * Check that ID is unique
@@ -233,7 +226,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                             drop(ref_endpoints);
 
-                            // We need to register for READABLE events to detect a closed connection
                             let token = next(&mut unique_token);
 
                             let (reader, mut writer) = pipe().unwrap();
@@ -243,9 +235,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                             let endpoint = Endpoint {
                                 id: req.get_id().to_string(),
-                                dir: req.get_direction().unwrap(),
+                                dir: req.get_direction(),
                                 stream: connection,
-                                writable: true,
                                 peer_writer: Some(writer),
                                 peer_reader: Some(reader),
                                 peer_token: None,
@@ -258,14 +249,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                         }
 
-                        _ => {continue;}
-
                     }
                     
                 }
                 token => {
-                    
-                    log!("event {:?} on token {:?}", event, token);
 
                     let mut ref_endpoints = endpoints.borrow_mut();
 
@@ -284,21 +271,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                     };
 
 
+                    log!("event {:?} on token {:?}, peer: {:?}", event, token, peer_token);
+
+
                     // perform the action
                     let (done,trx) = handlers::handle_client_event(token,&poll, client, &event)?;
 
                     log!("handler finished {:?}", done); 
-
-
-                    // If this is the Reciever, and we've received the last message
-                    // to be read, we're done sending to our peer Sender after the next
-                    // writeable event
-                    if client.dir == portal::Direction::Receiver && event.readiness().is_readable() {
-                        if let Some(peer) = ref_endpoints.get_mut(&peer_token) {
-                            peer.writable = false;
-                        }
-                    }
-
 
                     drop(ref_endpoints);
 
