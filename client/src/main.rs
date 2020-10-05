@@ -56,6 +56,9 @@ macro_rules! log_success {
     ($($arg:tt)*) => (println!("{} {}", "[+]".green().bold(), format_args!($($arg)*)));
 } 
 
+macro_rules! log_wait {
+    ($($arg:tt)*) => (print!("{} {}", "[...]".yellow().bold(), format_args!($($arg)*)); std::io::stdout().flush().unwrap(););
+} 
 
 
 fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net::TcpStream, is_reciever: bool) -> Result<(), Box<dyn Error>>  {
@@ -110,7 +113,7 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
     let mut total = 0;
     let pstyle = 
         ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+        .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
         .progress_chars("#>-");
 
     match is_reciever {
@@ -128,6 +131,7 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
             let mut file = portal.create_file(&fname, fsize)?;
 
             // Receive until connection is done
+            log_status!("Waiting for peer to begin transfer...");
             let len = match file.download_file(&client,|x| {pb.set_position(x)}) {
                 Ok(n) => n,
                 Err(e) => {
@@ -136,12 +140,14 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
                 }
             };
 
+            pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
+
             assert_eq!(len as u64, fsize);
 
             // Decrypt the file
+            log_wait!("Decrypting file...");
             file.decrypt()?;
-
-            pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
+            println!("{}","Ok!".green());
         }
         false => {
 
@@ -154,9 +160,10 @@ fn transfer(mut portal: Portal, msg: Vec<u8>, fpath: &str, mut client: std::net:
             let mut file = portal.load_file(fpath)?;
 
             // Encrypt the file
+            log_wait!("Encrypting file...");
             file.encrypt()?;
             file.sync_file_state(&mut client)?;
-            log_success!("Encrypted file!");
+            println!("{}","Ok!".green());
 
             // This will be empty for files created with create_file()
             let chunks = portal.get_chunks(&file,portal::CHUNK_SIZE);
