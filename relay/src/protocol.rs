@@ -8,12 +8,12 @@ use os_pipe::{pipe,PipeReader,PipeWriter};
 use mio::{Events, Ready, Poll, Token, PollOpt}; 
 
 
-use crate::{ENDPOINTS,UNIQUE_TOKEN,Endpoint};
+use crate::{ENDPOINTS,UNIQUE_TOKEN,Endpoint,EndpointPair};
 use crate::{networking,logging};
 
 // increment the polling token by one
 // for each new client connection
-fn next(current: &mut Token) -> Token {
+pub fn next(current: &mut Token) -> Token {
     let next = current.0;
     current.0 += 1;
     Token(next)
@@ -23,7 +23,7 @@ fn next(current: &mut Token) -> Token {
  * Attempt to parse a Portal request from the client and match it 
  * with a peer. If matched, the pair will be added to an event loop 
  */
-pub fn register(mut connection: TcpStream)  -> Result<(), Box<dyn Error>>  {
+pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<EndpointPair>)  -> Result<(), Box<dyn Error>>  {
 
     let mut received_data = Vec::with_capacity(1024);
     while received_data.len() == 0 {
@@ -74,7 +74,7 @@ pub fn register(mut connection: TcpStream)  -> Result<(), Box<dyn Error>>  {
             
 
             //let mut ref_endpoints = endpoints.borrow_mut();
-            let mut peer = match ref_endpoints.get_mut(&peer_token) {
+            let mut peer = match ref_endpoints.remove(&peer_token) {
                 Some(p) => p,
                 None => {return Ok(());},
             };
@@ -120,7 +120,14 @@ pub fn register(mut connection: TcpStream)  -> Result<(), Box<dyn Error>>  {
 
             log!("Added Receiver {:?}", endpoint);
 
-            ref_endpoints.entry(token).or_insert(endpoint);
+            //ref_endpoints.entry(token).or_insert(endpoint);
+
+            let pair = EndpointPair {
+                receiver: endpoint,
+                sender: peer,
+            };
+
+            tx.send(pair)?;
 
         }
         portal::Direction::Sender => {

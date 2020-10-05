@@ -12,6 +12,7 @@ use os_pipe::{pipe,PipeReader,PipeWriter};
 use std::sync::Mutex;
 use threadpool::ThreadPool;
 use std::time::SystemTime;
+use mio_extras::channel::channel;
 
 #[macro_use]
 extern crate lazy_static;
@@ -27,10 +28,11 @@ use protocol::register;
 
 // Some tokens to allow us to identify which event is for which socket.
 const SERVER: Token = Token(0);
+const CHANNEL: Token = Token(1);
 
 lazy_static! {
     static ref ENDPOINTS: Mutex<HashMap<Token, Endpoint>> = Mutex::new(HashMap::new());
-    static ref UNIQUE_TOKEN: Mutex<Token> = Mutex::new(Token(SERVER.0+1));
+    static ref UNIQUE_TOKEN: Mutex<Token> = Mutex::new(Token(CHANNEL.0+1));
 }
 
 #[derive(Debug)]
@@ -44,6 +46,11 @@ pub struct Endpoint {
     time_added: SystemTime,
 }
 
+#[derive(Debug)]
+pub struct EndpointPair {
+    sender: Endpoint,
+    receiver: Endpoint,
+}
 
 #[cfg(not(debug_assertions))]
 fn daemonize() -> Result<(),daemonize::DaemonizeError> {
@@ -83,10 +90,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut server = TcpListener::bind(&addr)?;
 
     // Start listening for incoming connections.
-    poll.register(&mut server, SERVER, Ready::readable(), PollOpt::level())?;
+    poll.register(&mut server, SERVER, Ready::readable(), PollOpt::edge())?;
 
     // Pre-allocate a few registration threads
     let thread_pool = ThreadPool::new(4);
+
+    // Create a channel to receive pairs from threads
+    let (tx, mut rx) = channel::<EndpointPair>();
+    poll.register(&mut rx, CHANNEL, Ready::readable(), PollOpt::edge())?;
 
     // Start an event loop.
     loop {
@@ -119,14 +130,23 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     
                     // TODO set RECV_TIMEO
+                    let tx_new = tx.clone();
                     thread_pool.execute(move || {
-                        match register(connection) {
+                        match register(connection,tx_new) {
                             Ok(_) => {},
                             Err(_e) => {
                                 log!("{}",_e);
                             }
                         }
                     });
+                }
+                CHANNEL => {
+                    let pair = match rx.try_recv() {
+                        Ok(p) => p,
+                        Err(_) => {continue;},
+                    };
+
+                    println!("ADDING PAIR {:?}", pair);
                 }
                 token => {
 
