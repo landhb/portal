@@ -99,7 +99,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 SERVER => loop {
 
-                   
+                    // Clear old entries before accepting, will keep
+                    // connections < 15 min old
+                    endpoints.borrow_mut().retain(|_, v| 
+                        !v.peer_token.is_none() || (
+                        v.time_added.elapsed().unwrap().as_secs() < 
+                        std::time::Duration::from_secs(60*15).as_secs())); 
+
                     // If this is an event for the server, it means a connection
                     // is ready to be accepted.
                     let (mut connection, _addr) = match server.accept() {
