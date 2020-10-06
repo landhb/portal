@@ -1,14 +1,22 @@
 extern crate portal_lib as portal;
 
 use mio::{Poll,Token, Ready, PollOpt};
-use crate::Endpoint;
+use crate::{Endpoint,EndpointPair};
 use mio::event::Event;
 use anyhow::Result;
 use std::os::unix::io::AsRawFd;
 use crate::log;
+use portal::Direction;
+
+/* From the cloudfare blog: 
+ * There is no "good" splice buffer size. Anecdotical evidence
+ * says that it should be no larger than 512KiB since this is
+ * the max we can expect realistically to fit into cpu
+ * cache. */
+const MAX_SLICE_SIZE: usize = 512*1024;
 
 /**
- *  Handles events without utilizing a userpace intermediary buffer
+ *  Handles TCP splicing without utilizing a userpace intermediary buffer
  *  Utilizing splice(2)
  *
  *  READABLE: Transfer data from Sender socket -> pipe
@@ -18,98 +26,136 @@ use crate::log;
  *   
  *  Sender socket -> Pipe -> Reciever Socket
  */
-pub fn handle_client_event (
-    token: Token,
+pub fn tcp_splice (
+    direction: Direction,
     registry: &Poll,
-    endpoint: &mut Endpoint,
+    pair: &mut EndpointPair,
     event: &Event) -> Result<(bool,isize)> {
 
-    let mut trx = 0;
+    let mut rx = 0;
+    let mut tx = 0;
     
-    // Readable events will be file data from the Sender
-    if event.readiness().is_readable() {
-
-        let writer = match &endpoint.peer_writer {
-            Some(p) => p,
-            None => {
-                // end this connection if there is no peer pipe
-                return Ok((true,0));
-            }
-        };
-
-        let src_fd = endpoint.stream.as_raw_fd();
-        let dst_fd = writer.as_raw_fd();
-
-        unsafe { let errno = libc::__errno_location(); *errno = 0;}
-        loop {
-            unsafe {
-                trx = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 65535, libc::SPLICE_F_NONBLOCK);  
-            }
-
-            // check if connection is closed
-            let errno = std::io::Error::last_os_error().raw_os_error();
-            if trx < 0 && errno != Some(0) && errno != Some(libc::EWOULDBLOCK) && errno != Some(libc::EAGAIN) {
-                return Ok((true,trx));
-            }
-
-            log!("got {} bytes from {:?}, errno: {:?}", trx, endpoint.dir,errno);
-
-            // break if blocking
-            if trx < 0 && (errno == Some(libc::EWOULDBLOCK) || errno == Some(libc::EAGAIN)) {
-                break;
-            }
-
-            // Done sending
-            if trx == 0 {
-                return Ok((true,trx));
-            } 
+    // Depending on which peer is readable, 
+    // use the appropriate pipe and source/dst FDs
+    let (src_fd, p_in, p_out, dst_fd,peer) = match direction {
+        Direction::Sender => {
+            let src_fd = pair.sender.stream.as_raw_fd();
+            let pipe_writer = pair.sender.peer_writer.as_ref().unwrap().as_raw_fd();
+            let pipe_reader = pair.receiver.peer_reader.as_ref().unwrap().as_raw_fd();
+            let dst_fd = pair.receiver.stream.as_raw_fd();
+            (src_fd,pipe_writer,pipe_reader,dst_fd,Direction::Receiver)
         }
+        Direction::Receiver => {
+            let src_fd = pair.receiver.stream.as_raw_fd();
+            let pipe_writer = pair.receiver.peer_writer.as_ref().unwrap().as_raw_fd();
+            let pipe_reader = pair.sender.peer_reader.as_ref().unwrap().as_raw_fd();
+            let dst_fd = pair.sender.stream.as_raw_fd();
+            (src_fd,pipe_writer,pipe_reader,dst_fd,Direction::Sender)
+        }
+    };
+
+    
+
+    unsafe { let errno = libc::__errno_location(); *errno = 0;}
+    loop {
+
+        unsafe {
+            rx = libc::splice(src_fd, 0 as *mut libc::loff_t, p_in, 0 as *mut libc::loff_t, MAX_SLICE_SIZE, libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);  
+        }
+
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
+        log!("got {} bytes from {:?}, errno: {:?}", rx, direction,errno);
+
+        // check if connection is closed
+        if rx < 0 && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
+            return Ok((true,rx));
+        }
+
+        // break if blocking
+        if rx < 0 && (errno == libc::EWOULDBLOCK || errno == libc::EAGAIN) {
+            break;
+        }
+
+        // Done reading
+        if rx == 0 {
+            return Ok((true,rx));
+        } 
+
+        unsafe {
+            tx = libc::splice(p_out, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, MAX_SLICE_SIZE,  libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);    
+        }
+
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
+        log!("sent {} bytes to {:?}, errno: {:?}", tx, peer, errno);
+
+        // check for errors
+        if tx < 0  && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
+            println!("exiting due to trx: {:?} errno {:?}", tx, errno);
+            return Ok((true,tx));
+        }
+
+        // break if blocking
+        if tx < 0 && (errno == libc::EWOULDBLOCK || errno == libc::EAGAIN) {
+            break;
+        }
+
+        if tx == 0 {
+            return Ok((true,tx));
+        } 
+
     }
 
-    // Writeable events will mean data is ready to be forwarded to the Reciever
-    if event.readiness().is_writable() {
+    Ok((false,tx))
+}
 
-        let reader = match &endpoint.peer_reader {
-            Some(p) => p,
-            None => {
-                // end this connection if there is no peer pipe
-                return Ok((true,0));
-            }
-        };
+/**
+ * Drain the pipe of any additional data destined for an Endpoint
+ */
+pub fn drain_pipe(
+    registry: &Poll,
+    endpoint: &Endpoint,
+    event: &Event) -> Result<(bool,isize)> {
 
-
-        let dst_fd = endpoint.stream.as_raw_fd();
-        let src_fd = reader.as_raw_fd();
-
-        unsafe { let errno = libc::__errno_location(); *errno = 0;}
-        loop  { 
-            unsafe {
-                trx = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 65535, libc::SPLICE_F_NONBLOCK);    
-            }
-
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
-
-            // check for errors
-            if trx < 0  && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
-                println!("exiting due to trx: {:?} errno {:?}", trx, errno);
-                return Ok((true,trx));
-            }
-
-            log!("sent {} bytes to {:?}, errno: {:?}", trx, endpoint.dir, errno);
-
-            // break if blocking
-            if trx < 0 && (errno == libc::EWOULDBLOCK || errno == libc::EAGAIN) {
-                break;
-            }
-
-            if trx == 0 {
-                break;
-            } 
-
+    let reader = match &endpoint.peer_reader {
+        Some(p) => p,
+        None => {
+            // end this connection if there is no peer pipe
+            return Ok((true,0));
         }
+    };
+
+
+    let dst_fd = endpoint.stream.as_raw_fd();
+    let src_fd = reader.as_raw_fd();
+
+    let mut trx = 0;
+
+    unsafe { let errno = libc::__errno_location(); *errno = 0;}
+    loop  { 
+        unsafe {
+            trx = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 65535, libc::SPLICE_F_NONBLOCK);    
+        }
+
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
+
+        // check for errors
+        if trx < 0  && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
+            println!("exiting due to trx: {:?} errno {:?}", trx, errno);
+            return Ok((true,trx));
+        }
+
+        log!("sent {} bytes to {:?}, errno: {:?}", trx, endpoint.dir, errno);
+
+        // break if blocking
+        if trx < 0 && (errno == libc::EWOULDBLOCK || errno == libc::EAGAIN) {
+            break;
+        }
+
+        if trx == 0 {
+            break;
+        } 
+
+    }
         
-    }
-
-
     Ok((false,trx))
 }

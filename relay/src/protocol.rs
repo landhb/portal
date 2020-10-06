@@ -8,16 +8,9 @@ use os_pipe::{pipe,PipeReader,PipeWriter};
 use mio::{Events, Ready, Poll, Token, PollOpt}; 
 
 
-use crate::{ENDPOINTS,UNIQUE_TOKEN,Endpoint,EndpointPair};
+use crate::{PENDING_ENDPOINTS,Endpoint,EndpointPair};
 use crate::{networking,logging};
 
-// increment the polling token by one
-// for each new client connection
-pub fn next(current: &mut Token) -> Token {
-    let next = current.0;
-    current.0 += 1;
-    Token(next)
-}
 
 /**
  * Attempt to parse a Portal request from the client and match it 
@@ -51,9 +44,9 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
 
     // Clear old entries before accepting, will keep
     // connections < 15 min old
-    let mut ref_endpoints = ENDPOINTS.lock().unwrap();
+    let mut ref_endpoints = PENDING_ENDPOINTS.lock().unwrap();
     ref_endpoints.retain(|_, v| 
-        !v.peer_token.is_none() || (
+        !v.token.is_none() || (
         v.time_added.elapsed().unwrap().as_secs() < 
         std::time::Duration::from_secs(60*15).as_secs())); 
 
@@ -67,27 +60,27 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
         portal::Direction::Receiver => {
 
             // Look for peer with identical ID
-            let peer_token  = match search {
+            let token  = match search {
                 Some(t) => t.clone(),
                 None => {return Ok(());}
             };
             
 
             //let mut ref_endpoints = endpoints.borrow_mut();
-            let mut peer = match ref_endpoints.remove(&peer_token) {
+            let mut peer = match ref_endpoints.remove(&id.to_string()) {
                 Some(p) => p,
                 None => {return Ok(());},
             };
 
 
             // if the peer already has a connection, disregard this one
-            if !peer.peer_token.is_none() {
+            if !peer.token.is_none() {
                 let _ = connection.shutdown(std::net::Shutdown::Both);
                 return Ok(());
             }
             
             // assign token since the peer is valid
-            let token = next(&mut UNIQUE_TOKEN.lock().unwrap());
+            //let token = next(&mut UNIQUE_TOKEN.lock().unwrap());
             
             // create the pipes for this transfer
             let (reader2, mut writer2) = pipe().unwrap();
@@ -100,12 +93,12 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
 
             // update the peer with the pipe information
             let old_reader = std::mem::replace(&mut peer.peer_reader, Some(reader2));
-            peer.peer_token = Some(token);
+            //peer.token = Some(token);
             
             // set socket to WRITABLE-interest initially to drain the pipes we just
             // wrote the acknowledgment messages to
             //poll.register(&mut connection, token, Ready::readable()|Ready::writable(),PollOpt::level())?;
-            //poll.register(&mut peer.stream, peer_token, Ready::readable()|Ready::writable(),PollOpt::level())?;
+            //poll.register(&mut peer.stream, token, Ready::readable()|Ready::writable(),PollOpt::level())?;
 
             // create this endpoint
             let endpoint = Endpoint {
@@ -114,7 +107,7 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
                 stream: connection,
                 peer_reader: old_reader,
                 peer_writer: Some(writer2), //None,
-                peer_token: Some(peer_token),
+                token: None, //Some(token),
                 time_added: SystemTime::now(),
             };
 
@@ -138,7 +131,7 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
                 None => {}
             };
 
-            let token = next(&mut UNIQUE_TOKEN.lock().unwrap());
+            //let token = next(&mut UNIQUE_TOKEN.lock().unwrap());
 
             let (reader, mut writer) = pipe().unwrap();
 
@@ -146,18 +139,18 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
             writer.write_all(&resp)?;
 
             let endpoint = Endpoint {
-                id: req.get_id().to_string(),
+                id: id.to_string(),
                 dir: req.get_direction(),
                 stream: connection,
                 peer_writer: Some(writer),
                 peer_reader: Some(reader),
-                peer_token: None,
+                token: None,
                 time_added: SystemTime::now(),
             };
 
             log!("Added Sender: {:?}", endpoint);
             
-            ref_endpoints.entry(token).or_insert(endpoint);
+            ref_endpoints.entry(id.to_string()).or_insert(endpoint);
 
         }
 
