@@ -66,10 +66,9 @@ pub fn tcp_splice (
             return Ok(true);
         }
 
-        // break if blocking
-        if rx < 0 && (errno == libc::EWOULDBLOCK || errno == libc::EAGAIN) {
-            break;
-        }
+        // We cannot break here on EWOULDBLOCK since the first splice may return EWOULDBLOCK
+        // if the pipe is full, in that case we'd want to complete the second splice to clear
+        // the pipe
 
         // Done reading
         if rx == 0 {

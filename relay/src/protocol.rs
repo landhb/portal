@@ -70,11 +70,10 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
                 let _ = connection.shutdown(std::net::Shutdown::Both);
                 return Ok(());
             }
-            
-            // assign token since the peer is valid
-            //let token = next(&mut UNIQUE_TOKEN.lock().unwrap());
-            
-            // create the pipes for this transfer
+
+            // This pipe will be used to send data from Receiver->Sender
+            // so the Sender will keep the read side, and the Receiver will
+            // keep the write side
             let (reader2, mut writer2) = pipe().unwrap();
             
             // write the acknowledgement response to both pipe endpoints
@@ -85,12 +84,6 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
 
             // update the peer with the pipe information
             let old_reader = std::mem::replace(&mut peer.peer_reader, Some(reader2));
-            //peer.token = Some(token);
-            
-            // set socket to WRITABLE-interest initially to drain the pipes we just
-            // wrote the acknowledgment messages to
-            //poll.register(&mut connection, token, Ready::readable()|Ready::writable(),PollOpt::level())?;
-            //poll.register(&mut peer.stream, token, Ready::readable()|Ready::writable(),PollOpt::level())?;
 
             // create this endpoint
             let endpoint = Endpoint {
@@ -105,13 +98,14 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
 
             log!("Added Receiver {:?}", endpoint);
 
-            //ref_endpoints.entry(token).or_insert(endpoint);
 
             let pair = EndpointPair {
                 receiver: endpoint,
                 sender: peer,
             };
 
+            // Communicate the new pair over the MPSC channel
+            // back to the main event loop
             tx.send(pair)?;
 
         }
@@ -123,8 +117,8 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
                 None => {}
             };
 
-            //let token = next(&mut UNIQUE_TOKEN.lock().unwrap());
-
+            // This pipe will be used to send data from Sender->Receiver
+            // TODO fcntl to make this larger
             let (reader, mut writer) = pipe().unwrap();
 
             let resp = req.serialize()?;

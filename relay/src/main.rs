@@ -170,8 +170,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         Err(_) => {continue;},
                     };
 
-                    println!("ADDING PAIR {:?}", pair);
-
                     let sender_token = next(&mut unique_token);
                     let receiver_token = next(&mut unique_token);
 
@@ -185,7 +183,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     id_lookup.borrow_mut().entry(receiver_token).or_insert(pair.sender.id.clone());
                     endpoints.borrow_mut().entry(pair.sender.id.clone()).or_insert(pair);
 
-                    println!("SUCCESS");
                 }
                 /*
                  * Any other events indicate there is data we need to channel between two TCP connections
@@ -222,7 +219,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     log!("event {:?} on token {:?}, side: {:?}", event, token, side);
 
                     // Turn off writable notifications if on, this is only used to kick off the 
-                    // initial message exchange by draining on of the peer's pipes
+                    // initial message exchange by draining the sender's pipes
                     if event.readiness().is_writable() {
                         handlers::drain_pipe(endpoint)?;
                         poll.reregister(stream, token, Ready::readable(),PollOpt::level())?;
@@ -236,7 +233,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // If this connection is finished, or our peer has disconnected
                     // shutdown the connection
                     if done {
-                        log!("Removing endpoint for {:?}", pair);
+                        log!("Removing {:?}", pair);
+
+                        // There may still be some data in the Receiver's pipe, drain it
+                        // before closing connections
+                        handlers::drain_pipe(&pair.receiver)?;
+
+                        // Shutdown connections
                         poll.deregister(&mut pair.sender.stream)?;
                         poll.deregister(&mut pair.receiver.stream)?;
                         match pair.sender.stream.shutdown(std::net::Shutdown::Both) {
@@ -247,8 +250,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 Ok(_) => {},
                                 Err(_) => {},
                         }
-                    } 
-
+                    }
                 }
             }
         }
