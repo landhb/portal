@@ -29,6 +29,14 @@ use protocol::register;
 const SERVER: Token = Token(0);
 const CHANNEL: Token = Token(1);
 
+/* From the cloudfare blog: 
+ * There is no "good" splice buffer size. Anecdotical evidence
+ * says that it should be no larger than 512KiB since this is
+ * the max we can expect realistically to fit into cpu
+ * cache. */
+const MAX_SPLICE_SIZE: usize = 512*1024;
+
+
 lazy_static! {
     static ref PENDING_ENDPOINTS: Mutex<HashMap<String, Endpoint>> = Mutex::new(HashMap::new());
 }

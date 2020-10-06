@@ -5,10 +5,10 @@ use std::io::Write;
 
 use std::time::SystemTime;
 use os_pipe::pipe;
+use std::os::unix::io::AsRawFd;
 
 
-use crate::{PENDING_ENDPOINTS,Endpoint,EndpointPair};
-use crate::networking;
+use crate::{PENDING_ENDPOINTS,Endpoint,EndpointPair,networking,MAX_SPLICE_SIZE};
 
 
 /**
@@ -120,6 +120,15 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
             // This pipe will be used to send data from Sender->Receiver
             // TODO fcntl to make this larger
             let (reader, mut writer) = pipe().unwrap();
+
+            // resize the pipe that we will be using for the actual
+            // file transfer
+            unsafe { 
+                let res = libc::fcntl(reader.as_raw_fd(),libc::F_SETPIPE_SZ,MAX_SPLICE_SIZE);
+                if res < 0 {
+                    return Ok(());
+                }
+            }
 
             let resp = req.serialize()?;
             writer.write_all(&resp)?;

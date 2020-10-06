@@ -3,15 +3,8 @@ extern crate portal_lib as portal;
 use crate::{Endpoint,EndpointPair};
 use anyhow::Result;
 use std::os::unix::io::AsRawFd;
-use crate::log;
+use crate::{log,MAX_SPLICE_SIZE};
 use portal::Direction;
-
-/* From the cloudfare blog: 
- * There is no "good" splice buffer size. Anecdotical evidence
- * says that it should be no larger than 512KiB since this is
- * the max we can expect realistically to fit into cpu
- * cache. */
-const MAX_SLICE_SIZE: usize = 512*1024;
 
 /**
  *  Handles TCP splicing without utilizing a userpace intermediary buffer
@@ -50,12 +43,11 @@ pub fn tcp_splice (
     };
 
     
-
-    unsafe { let errno = libc::__errno_location(); *errno = 0;}
     loop {
 
         unsafe {
-            rx = libc::splice(src_fd, 0 as *mut libc::loff_t, p_in, 0 as *mut libc::loff_t, MAX_SLICE_SIZE, libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);  
+            *libc::__errno_location() = 0;
+            rx = libc::splice(src_fd, 0 as *mut libc::loff_t, p_in, 0 as *mut libc::loff_t, MAX_SPLICE_SIZE, libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);  
         }
 
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
@@ -76,7 +68,7 @@ pub fn tcp_splice (
         } 
 
         unsafe {
-            tx = libc::splice(p_out, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, MAX_SLICE_SIZE,  libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);    
+            tx = libc::splice(p_out, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, MAX_SPLICE_SIZE,  libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);    
         }
 
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
