@@ -48,14 +48,17 @@ pub struct Endpoint {
     stream: TcpStream,
     peer_writer: Option<PipeWriter>,
     peer_reader: Option<PipeReader>,
-    token: Option<Token>,
+    has_peer: bool,
     time_added: SystemTime,
 }
 
 #[derive(Debug)]
 pub struct EndpointPair {
     sender: Endpoint,
+    sender_token: Token,
+
     receiver: Endpoint,
+    receiver_token: Token,
 }
 
 #[cfg(not(debug_assertions))]
@@ -85,8 +88,6 @@ pub fn next(current: &mut Token) -> Token {
     current.0 += 1;
     Token(next)
 }
-
-
 
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -178,17 +179,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                         Err(_) => {continue;},
                     };
 
-                    let sender_token = next(&mut unique_token);
-                    let receiver_token = next(&mut unique_token);
 
-                    pair.sender.token = Some(sender_token);
-                    pair.receiver.token = Some(receiver_token);
+                    pair.sender_token = next(&mut unique_token);
+                    pair.receiver_token =  next(&mut unique_token);
 
-                    poll.register(&mut pair.sender.stream, sender_token, Ready::readable()|Ready::writable(),PollOpt::edge())?;
-                    poll.register(&mut pair.receiver.stream, receiver_token, Ready::readable(),PollOpt::level())?;
+                    poll.register(&mut pair.sender.stream, pair.sender_token, Ready::readable()|Ready::writable(),PollOpt::edge())?;
+                    poll.register(&mut pair.receiver.stream, pair.receiver_token, Ready::readable(),PollOpt::level())?;
 
-                    id_lookup.borrow_mut().entry(sender_token).or_insert(pair.sender.id.clone());
-                    id_lookup.borrow_mut().entry(receiver_token).or_insert(pair.sender.id.clone());
+                    id_lookup.borrow_mut().entry(pair.sender_token).or_insert(pair.sender.id.clone());
+                    id_lookup.borrow_mut().entry(pair.receiver_token).or_insert(pair.sender.id.clone());
                     endpoints.borrow_mut().entry(pair.sender.id.clone()).or_insert(pair);
 
                 }
@@ -218,8 +217,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     // determine which Endpoint is readable
                     let (side,stream,endpoint) = match token {
-                        x if Some(x) == pair.sender.token => {(Direction::Sender,&pair.sender.stream, &pair.sender)},
-                        x if Some(x) == pair.receiver.token => {(Direction::Receiver,&pair.receiver.stream, &pair.receiver)},
+                        x if x == pair.sender_token => {(Direction::Sender,&pair.sender.stream, &pair.sender)},
+                        x if x == pair.receiver_token => {(Direction::Receiver,&pair.receiver.stream, &pair.receiver)},
                         _ => {continue;},
                     };
 
@@ -245,6 +244,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                         // There may still be some data in the Receiver's pipe, drain it
                         // before closing connections
+                        // TODO: this should really be registering the Receiver for future
+                        // writable events until the pipe is fully clear, since this could
+                        // potentially return EWOULDBLOCK
                         handlers::drain_pipe(&pair.receiver)?;
 
                         // Shutdown connections

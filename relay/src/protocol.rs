@@ -2,7 +2,7 @@ use mio::net::TcpStream;
 use portal_lib::Portal;
 use std::error::Error;
 use std::io::Write;
-
+use mio::Token;
 use std::time::SystemTime;
 use os_pipe::pipe;
 use std::os::unix::io::AsRawFd;
@@ -10,6 +10,7 @@ use std::os::unix::io::AsRawFd;
 
 use crate::{PENDING_ENDPOINTS,Endpoint,EndpointPair,networking,MAX_SPLICE_SIZE};
 
+const PLACEHOLDER: usize = 0;
 
 /**
  * Attempt to parse a Portal request from the client and match it 
@@ -45,14 +46,12 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
     // connections < 15 min old
     let mut ref_endpoints = PENDING_ENDPOINTS.lock().unwrap();
     ref_endpoints.retain(|_, v| 
-        !v.token.is_none() || (
+        v.has_peer || (
         v.time_added.elapsed().unwrap().as_secs() < 
         std::time::Duration::from_secs(60*15).as_secs())); 
 
     // Lookup existing endpoint with this ID
     let id = req.get_id();
-    let search = ref_endpoints.iter()
-            .find_map(|(key, val)| if *val.id == *id  { Some(key) } else { None });
 
     match req.get_direction() {
 
@@ -66,7 +65,7 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
 
 
             // if the peer already has a connection, disregard this one
-            if !peer.token.is_none() {
+            if peer.has_peer {
                 let _ = connection.shutdown(std::net::Shutdown::Both);
                 return Ok(());
             }
@@ -84,6 +83,7 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
 
             // update the peer with the pipe information
             let old_reader = std::mem::replace(&mut peer.peer_reader, Some(reader2));
+            peer.has_peer = true;
 
             // create this endpoint
             let endpoint = Endpoint {
@@ -92,7 +92,7 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
                 stream: connection,
                 peer_reader: old_reader,
                 peer_writer: Some(writer2), //None,
-                token: None, //Some(token),
+                has_peer: true, 
                 time_added: SystemTime::now(),
             };
 
@@ -100,8 +100,10 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
 
 
             let pair = EndpointPair {
-                receiver: endpoint,
                 sender: peer,
+                sender_token: Token(PLACEHOLDER),
+                receiver: endpoint,
+                receiver_token: Token(PLACEHOLDER),
             };
 
             // Communicate the new pair over the MPSC channel
@@ -111,14 +113,15 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
         }
         portal::Direction::Sender => {
 
-            // Kill the connection if this ID is being used by another sender
+            // Kill the connection if this ID is being used by another pending sender
+            let search = ref_endpoints.iter()
+            .find_map(|(key, val)| if *val.id == *id  { Some(key) } else { None });
             match search {
                 Some(_) => {return Ok(());}
                 None => {}
             };
 
             // This pipe will be used to send data from Sender->Receiver
-            // TODO fcntl to make this larger
             let (reader, mut writer) = pipe().unwrap();
 
             // resize the pipe that we will be using for the actual
@@ -139,14 +142,13 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
                 stream: connection,
                 peer_writer: Some(writer),
                 peer_reader: Some(reader),
-                token: None,
+                has_peer: false,
                 time_added: SystemTime::now(),
             };
 
             log!("Added Sender: {:?}", endpoint);
             
             ref_endpoints.entry(id.to_string()).or_insert(endpoint);
-
         }
 
     }

@@ -136,7 +136,7 @@ pub fn drain_pipe(
         }
 
         if trx == 0 {
-            break;
+            return Ok((true,0));
         } 
 
     }
