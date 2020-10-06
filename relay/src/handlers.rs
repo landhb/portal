@@ -1,8 +1,6 @@
 extern crate portal_lib as portal;
 
-use mio::{Poll,Token, Ready, PollOpt};
 use crate::{Endpoint,EndpointPair};
-use mio::event::Event;
 use anyhow::Result;
 use std::os::unix::io::AsRawFd;
 use crate::log;
@@ -17,7 +15,6 @@ const MAX_SLICE_SIZE: usize = 512*1024;
 
 /**
  *  Handles TCP splicing without utilizing a userpace intermediary buffer
- *  Utilizing splice(2)
  *
  *  READABLE: Transfer data from Sender socket -> pipe
  *  WRITEABLE: Transfer data from pipe -> Reciever socket
@@ -28,16 +25,14 @@ const MAX_SLICE_SIZE: usize = 512*1024;
  */
 pub fn tcp_splice (
     direction: Direction,
-    registry: &Poll,
-    pair: &mut EndpointPair,
-    event: &Event) -> Result<(bool,isize)> {
+    pair: &mut EndpointPair) -> Result<bool> {
 
-    let mut rx = 0;
-    let mut tx = 0;
+    let mut rx;
+    let mut tx;
     
     // Depending on which peer is readable, 
     // use the appropriate pipe and source/dst FDs
-    let (src_fd, p_in, p_out, dst_fd,peer) = match direction {
+    let (src_fd, p_in, p_out, dst_fd,_peer) = match direction {
         Direction::Sender => {
             let src_fd = pair.sender.stream.as_raw_fd();
             let pipe_writer = pair.sender.peer_writer.as_ref().unwrap().as_raw_fd();
@@ -68,7 +63,7 @@ pub fn tcp_splice (
 
         // check if connection is closed
         if rx < 0 && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
-            return Ok((true,rx));
+            return Ok(true);
         }
 
         // break if blocking
@@ -78,7 +73,7 @@ pub fn tcp_splice (
 
         // Done reading
         if rx == 0 {
-            return Ok((true,rx));
+            return Ok(true);
         } 
 
         unsafe {
@@ -86,12 +81,12 @@ pub fn tcp_splice (
         }
 
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
-        log!("sent {} bytes to {:?}, errno: {:?}", tx, peer, errno);
+        log!("sent {} bytes to {:?}, errno: {:?}", tx, _peer, errno);
 
         // check for errors
         if tx < 0  && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
             println!("exiting due to trx: {:?} errno {:?}", tx, errno);
-            return Ok((true,tx));
+            return Ok(true);
         }
 
         // break if blocking
@@ -100,21 +95,19 @@ pub fn tcp_splice (
         }
 
         if tx == 0 {
-            return Ok((true,tx));
+            return Ok(true);
         } 
 
     }
 
-    Ok((false,tx))
+    Ok(false)
 }
 
 /**
  * Drain the pipe of any additional data destined for an Endpoint
  */
 pub fn drain_pipe(
-    registry: &Poll,
-    endpoint: &Endpoint,
-    event: &Event) -> Result<(bool,isize)> {
+    endpoint: &Endpoint) -> Result<(bool,isize)> {
 
     let reader = match &endpoint.peer_reader {
         Some(p) => p,
@@ -128,7 +121,7 @@ pub fn drain_pipe(
     let dst_fd = endpoint.stream.as_raw_fd();
     let src_fd = reader.as_raw_fd();
 
-    let mut trx = 0;
+    let mut trx;
 
     unsafe { let errno = libc::__errno_location(); *errno = 0;}
     loop  { 

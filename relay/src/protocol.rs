@@ -4,12 +4,11 @@ use std::error::Error;
 use std::io::Write;
 
 use std::time::SystemTime;
-use os_pipe::{pipe,PipeReader,PipeWriter};
-use mio::{Events, Ready, Poll, Token, PollOpt}; 
+use os_pipe::pipe;
 
 
 use crate::{PENDING_ENDPOINTS,Endpoint,EndpointPair};
-use crate::{networking,logging};
+use crate::networking;
 
 
 /**
@@ -58,13 +57,6 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
     match req.get_direction() {
 
         portal::Direction::Receiver => {
-
-            // Look for peer with identical ID
-            let token  = match search {
-                Some(t) => t.clone(),
-                None => {return Ok(());}
-            };
-            
 
             //let mut ref_endpoints = endpoints.borrow_mut();
             let mut peer = match ref_endpoints.remove(&id.to_string()) {

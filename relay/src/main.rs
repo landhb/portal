@@ -1,14 +1,13 @@
 extern crate portal_lib as portal;
 
-use portal::{Portal,Direction};
+use portal::Direction;
 use std::collections::HashMap;
 use std::error::Error;
 use std::cell::{RefCell};
 use std::rc::Rc;
-use std::io::Write;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Ready, Poll, Token, PollOpt}; 
-use os_pipe::{pipe,PipeReader,PipeWriter};
+use os_pipe::{PipeReader,PipeWriter};
 use std::sync::Mutex;
 use threadpool::ThreadPool;
 use std::time::SystemTime;
@@ -32,7 +31,6 @@ const CHANNEL: Token = Token(1);
 
 lazy_static! {
     static ref PENDING_ENDPOINTS: Mutex<HashMap<String, Endpoint>> = Mutex::new(HashMap::new());
-    //static ref UNIQUE_TOKEN: Mutex<Token> = Mutex::new(Token(CHANNEL.0+1));
 }
 
 #[derive(Debug)]
@@ -136,7 +134,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     // If this is an event for the server, it means a connection
                     // is ready to be accepted.
-                    let (mut connection, _addr) = match server.accept() {
+                    let (connection, _addr) = match server.accept() {
                         Ok((s, addr)) => (s,addr),
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             // go back to polling for connections
@@ -226,12 +224,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // Turn off writable notifications if on, this is only used to kick off the 
                     // initial message exchange by draining on of the peer's pipes
                     if event.readiness().is_writable() {
-                        handlers::drain_pipe(&poll,endpoint, &event)?;
+                        handlers::drain_pipe(endpoint)?;
                         poll.reregister(stream, token, Ready::readable(),PollOpt::level())?;
                     }
 
                     // perform the action
-                    let (done,trx) = handlers::tcp_splice(side,&poll, pair, &event)?;
+                    let done = handlers::tcp_splice(side, pair)?;
 
                     log!("handler finished {:?}", done); 
 
