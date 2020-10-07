@@ -1,14 +1,14 @@
 
-## Portal  [![license-badge][]][license] [![rust-version-badge][]][rust-version]
+## Portal  
+[![cargo-badge-lib][]][cargo-lib] [![docs-badge-lib][]][docs-lib] [![license-badge][]][license] [![rust-version-badge][]][rust-version]  
 
 Securely & quickly transport your files.
 
-| ------- | ------------------------------------- | ---------------------------------------- |
-| portal-client   | [![cargo-badge-client][]][cargo-client]  | [![docs-badge-client][]][docs-client]                  |
-| portal-lib   | [![cargo-badge-lib][]][cargo-lib]  | [![docs-badge-lib][]][docs-lib]                  |
-| portal-relay | -        | -         |
 
-### Client Install
+### Client Install 
+[![cargo-badge-client][]][cargo-client] 
+
+The client binary can be installed via Cargo:
 
 ```
 cargo install portal-client
