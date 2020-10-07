@@ -1,12 +1,12 @@
 
-## Portal 
-
-[![crates.io](https://img.shields.io/crates/v/portal-lib.svg)](https://crates.io/crates/portal-lib)
-[![Documentation](https://docs.rs/portal-lib/badge.svg)](https://docs.rs/portal-lib)
-![Apache2/MIT licensed][license-image]
-![Rust Version][rustc-image]
+## Portal  [![license-badge][]][license] [![rust-version-badge][]][rust-version]
 
 Securely & quickly transport your files.
+
+| ------- | ------------------------------------- | ---------------------------------------- |
+| portal-client   | [![cargo-badge-client][]][cargo-client]  | [![docs-badge-client][]][docs-client]                  |
+| portal-lib   | [![cargo-badge-lib][]][cargo-lib]  | [![docs-badge-lib][]][docs-lib]                  |
+| portal-relay | -        | -         |
 
 ### Client Install
 
@@ -78,5 +78,17 @@ This tool works extremely similarly to Wormhole written by [Brian Warner](https:
 
 
 [//]: # (badges)
-[license-image]: https://img.shields.io/badge/license-Apache2.0/MIT-blue.svg
-[rustc-image]: https://img.shields.io/badge/rustc-1.41+-blue.svg
+[license-badge]: https://img.shields.io/badge/license-MIT/Apache--2.0-lightgray.svg?style=flat-square
+[license]: #license
+[rust-version-badge]: https://img.shields.io/badge/rust-latest%20stable-blue.svg?style=flat-square
+[rust-version]: #rust-version-policy
+
+[cargo-badge-client]: https://img.shields.io/crates/v/portal-client.svg?style=flat-square
+[cargo-client]: https://crates.io/crates/portal-client
+[cargo-badge-lib]: https://img.shields.io/crates/v/portal-lib.svg?style=flat-square
+[cargo-lib]: https://crates.io/crates/portal-lib
+
+[docs-badge-client]: https://docs.rs/portal-client/badge.svg?style=flat-square
+[docs-client]: https://docs.rs/portal-client
+[docs-badge-lib]: https://docs.rs/portal-lib/badge.svg?style=flat-square
+[docs-lib]: https://docs.rs/portal-lib
