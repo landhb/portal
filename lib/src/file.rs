@@ -2,15 +2,13 @@ use chacha20poly1305::ChaCha20Poly1305;
 use anyhow::Result;
 use memmap::MmapMut;
 use rand::Rng;
-
 use std::io::Write;
 use serde::{Serialize, Deserialize};
-use chacha20poly1305::{Nonce,Tag}; 
+use chacha20poly1305::{Nonce,Tag,aead::AeadInPlace}; 
 
 
 use crate::errors::PortalError;
 
-use chacha20poly1305::aead::AeadInPlace;
 
 
 /**
@@ -29,6 +27,11 @@ pub struct PortalFile {
     pos: usize,
 }
 
+/**
+ * PortalFile metadata containing encryption state 
+ * data that must be transferred to the peer for 
+ * decryption
+ */
 #[derive(Serialize, Deserialize, PartialEq)]
 struct StateMetadata {
     nonce: Vec<u8>,

@@ -1,4 +1,6 @@
-
+/**
+ * An iterator of an mmap'd PortalFile
+ */
 pub struct PortalChunks<'a, T: 'a> {
     v: &'a [T],
     chunk_size: usize,
@@ -7,7 +9,7 @@ pub struct PortalChunks<'a, T: 'a> {
 impl<'a, T: 'a> PortalChunks<'a, T> {
     pub fn init(data: &'a [T], chunk_size: usize) -> PortalChunks<'a,T> {
         PortalChunks{
-            v: data, // TODO: verify that this is zero-copy/move
+            v: data, 
             chunk_size: chunk_size,
         }
     }

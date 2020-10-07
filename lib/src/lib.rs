@@ -145,6 +145,10 @@ pub enum Direction {
     Receiver,
 }
 
+/**
+ * Method to compair arbitrary &[u8] slices, used internally
+ * to compare key exchange and derivation data
+ */
 fn compare_key_derivations(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
     for (ai, bi) in a.iter().zip(b.iter()) {
         match ai.cmp(&bi) {
@@ -160,7 +164,7 @@ fn compare_key_derivations(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
 impl Portal {
     
     /**
-     * Initialize 
+     * Initialize a new portal request
      */
     pub fn init(direction: Direction, 
                 id: String,
@@ -308,7 +312,7 @@ impl Portal {
      */
     pub fn get_chunks<'a>(&self, data: &'a PortalFile, chunk_size: usize) -> PortalChunks<'a,u8> {
         PortalChunks::init(
-            &data.mmap[..], // TODO: verify that this is zero-copy/move
+            &data.mmap[..], // TODO: verify that this is zero-copy
             chunk_size,
         )
     }
