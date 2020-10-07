@@ -1,6 +1,6 @@
 extern crate portal_lib as portal;
 
-use crate::{Endpoint,EndpointPair};
+use crate::Endpoint;
 use anyhow::Result;
 use std::os::unix::io::AsRawFd;
 use crate::{log,MAX_SPLICE_SIZE};
@@ -17,30 +17,18 @@ use portal::Direction;
  *  Sender socket -> Pipe -> Reciever Socket
  */
 pub fn tcp_splice (
-    direction: Direction,
-    pair: &mut EndpointPair) -> Result<bool> {
+    endpoint: &Endpoint,
+    peer: &Endpoint) -> Result<bool> {
 
     let mut rx;
     let mut tx;
-    
-    // Depending on which peer is readable, 
-    // use the appropriate pipe and source/dst FDs
-    let (src_fd, p_in, p_out, dst_fd,_peer) = match direction {
-        Direction::Sender => {
-            let src_fd = pair.sender.stream.as_raw_fd();
-            let pipe_writer = pair.sender.peer_writer.as_ref().unwrap().as_raw_fd();
-            let pipe_reader = pair.receiver.peer_reader.as_ref().unwrap().as_raw_fd();
-            let dst_fd = pair.receiver.stream.as_raw_fd();
-            (src_fd,pipe_writer,pipe_reader,dst_fd,Direction::Receiver)
-        }
-        Direction::Receiver => {
-            let src_fd = pair.receiver.stream.as_raw_fd();
-            let pipe_writer = pair.receiver.peer_writer.as_ref().unwrap().as_raw_fd();
-            let pipe_reader = pair.sender.peer_reader.as_ref().unwrap().as_raw_fd();
-            let dst_fd = pair.sender.stream.as_raw_fd();
-            (src_fd,pipe_writer,pipe_reader,dst_fd,Direction::Sender)
-        }
-    };
+
+
+    let src_fd = endpoint.stream.as_raw_fd();
+    let p_in = endpoint.peer_writer.as_ref().unwrap().as_raw_fd();
+
+    let p_out = peer.peer_reader.as_ref().unwrap().as_raw_fd();
+    let dst_fd = peer.stream.as_raw_fd();
 
     
     loop {
@@ -51,7 +39,7 @@ pub fn tcp_splice (
         }
 
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
-        log!("got {} bytes from {:?}, errno: {:?}", rx, direction,errno);
+        log!("got {} bytes from {:?}, errno: {:?}", rx, endpoint.dir,errno);
 
         // check if connection is closed
         if rx < 0 && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
@@ -59,8 +47,8 @@ pub fn tcp_splice (
         }
 
         // We cannot break here on EWOULDBLOCK since the first splice may return EWOULDBLOCK
-        // if the pipe is full, in that case we'd want to complete the second splice to clear
-        // the pipe
+        // if the pipe is full, in that case we'd still want to complete the second splice 
+        // to clear the pipe
 
         // Done reading
         if rx == 0 {
@@ -72,7 +60,7 @@ pub fn tcp_splice (
         }
 
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
-        log!("sent {} bytes to {:?}, errno: {:?}", tx, _peer, errno);
+        log!("sent {} bytes to {:?}, errno: {:?}", tx, peer.dir , errno);
 
         // check for errors
         if tx < 0  && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
@@ -98,13 +86,13 @@ pub fn tcp_splice (
  * Drain the pipe of any additional data destined for an Endpoint
  */
 pub fn drain_pipe(
-    endpoint: &Endpoint) -> Result<(bool,isize)> {
+    endpoint: &Endpoint) -> Result<bool> {
 
     let reader = match &endpoint.peer_reader {
         Some(p) => p,
         None => {
             // end this connection if there is no peer pipe
-            return Ok((true,0));
+            return Ok(true);
         }
     };
 
@@ -117,7 +105,7 @@ pub fn drain_pipe(
     unsafe { let errno = libc::__errno_location(); *errno = 0;}
     loop  { 
         unsafe {
-            trx = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, 65535, libc::SPLICE_F_NONBLOCK);    
+            trx = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, MAX_SPLICE_SIZE,libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);     
         }
 
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
@@ -125,10 +113,10 @@ pub fn drain_pipe(
         // check for errors
         if trx < 0  && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
             println!("exiting due to trx: {:?} errno {:?}", trx, errno);
-            return Ok((true,trx));
+            return Ok(true);
         }
 
-        log!("sent {} bytes to {:?}, errno: {:?}", trx, endpoint.dir, errno);
+        log!("drained {} bytes to {:?}, errno: {:?}", trx, endpoint.dir, errno);
 
         // break if blocking
         if trx < 0 && (errno == libc::EWOULDBLOCK || errno == libc::EAGAIN) {
@@ -136,10 +124,10 @@ pub fn drain_pipe(
         }
 
         if trx == 0 {
-            return Ok((true,0));
+            return Ok(true);
         } 
 
     }
         
-    Ok((false,trx))
+    Ok(false)
 }

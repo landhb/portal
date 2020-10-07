@@ -170,7 +170,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 /*
                  * When a worker thread has completed pairing two peers, the EndpointPair
-                 * will be send over an MPSC channel to be added to the list of file descriptors
+                 * will be sent over an MPSC channel to be added to the list of file descriptors
                  * we're polling 
                  */
                 CHANNEL => {
@@ -215,50 +215,74 @@ fn main() -> Result<(), Box<dyn Error>> {
                         },
                     };
 
-                    // determine which Endpoint is readable
-                    let (side,stream,endpoint) = match token {
-                        x if x == pair.sender_token => {(Direction::Sender,&pair.sender.stream, &pair.sender)},
-                        x if x == pair.receiver_token => {(Direction::Receiver,&pair.receiver.stream, &pair.receiver)},
+                    drop(lookup);
+
+                    // determine which Endpoint triggered the event
+                    let (side,endpoint,peer) = match token {
+                        x if x == pair.sender_token => {(Direction::Sender,&mut pair.sender,&mut pair.receiver)},
+                        x if x == pair.receiver_token => {(Direction::Receiver, &mut pair.receiver,&mut pair.sender)},
                         _ => {continue;},
                     };
 
 
-                    log!("event {:?} on token {:?}, side: {:?}", event, token, side);
+                    log!("event {:?}, side: {:?}", event, side);
 
-                    // Turn off writable notifications if on, this is only used to kick off the 
-                    // initial message exchange by draining the sender's pipes
-                    if event.readiness().is_writable() {
-                        handlers::drain_pipe(endpoint)?;
-                        poll.reregister(stream, token, Ready::readable(),PollOpt::level())?;
+                    let mut done = false;
+
+                    // if we received data on this endpoint, splice it to the peer
+                    if event.readiness().is_readable() {
+                        done = handlers::tcp_splice(endpoint,peer)?;
                     }
 
-                    // perform the action
-                    let done = handlers::tcp_splice(side, pair)?;
+                    // if we got a writable event, then there is pending data in the intermediary pipe
+                    if event.readiness().is_writable() {
+
+                        done = handlers::drain_pipe(endpoint)?;
+
+                        // Turn off writable notifications for the Sender if on, this is only used
+                        // to kick off the initial message exchange by draining the initial pipe
+                        if side == Direction::Sender {
+                            poll.reregister(&endpoint.stream, token, Ready::readable(),PollOpt::level())?;
+                        }
+                    }
 
                     log!("handler finished {:?}", done); 
 
                     // If this connection is finished, or our peer has disconnected
                     // shutdown the connection
                     if done {
-                        log!("Removing {:?}", pair);
+
+                        log!("Removing {:?}", endpoint);
 
                         // There may still be some data in the Receiver's pipe, drain it
-                        // before closing connections
-                        // TODO: this should really be registering the Receiver for future
-                        // writable events until the pipe is fully clear, since this could
-                        // potentially return EWOULDBLOCK
-                        handlers::drain_pipe(&pair.receiver)?;
+                        // before closing the peer connection. We must register for writeable
+                        // events in case the Receiver's socket is still blocking
+                        if side == Direction::Sender {
+                            match poll.reregister(&peer.stream, pair.receiver_token,Ready::writable(),PollOpt::edge()) { 
+                                Ok(_) => {},
+                                Err(e) => {println!("{:?}", e);},
+                            }
+                        } 
 
-                        // Shutdown connections
-                        poll.deregister(&mut pair.sender.stream)?;
-                        poll.deregister(&mut pair.receiver.stream)?;
-                        match pair.sender.stream.shutdown(std::net::Shutdown::Both) {
+                        // Shutdown this endpoint
+                        poll.deregister(&endpoint.stream)?;
+                        let id = id_lookup.borrow_mut().remove(&token);
+                        match endpoint.stream.shutdown(std::net::Shutdown::Both) {
                                 Ok(_) => {},
                                 Err(_) => {},
                         }
-                        match pair.receiver.stream.shutdown(std::net::Shutdown::Both) {
-                                Ok(_) => {},
-                                Err(_) => {},
+
+                        // close the write end of the pipe, otherwise splice() will continually
+                        // return EWOULDBLOCK intead of knowing when there is no data left
+                        let old_writer = std::mem::replace(&mut endpoint.peer_writer, None);
+                        drop(old_writer);
+
+                        // indicate to the peer that this endpoint is gone
+                        peer.has_peer = false;
+
+                        // If our peer is also gone, remove the entire EndpointPair
+                        if endpoint.has_peer == false {
+                            let _ = ref_endpoints.remove(&id.unwrap_or("none".to_string()));
                         }
                     }
                 }
