@@ -83,9 +83,9 @@ This tool works extremely similarly to Wormhole written by [Brian Warner](https:
 [rust-version-badge]: https://img.shields.io/badge/rust-latest%20stable-blue.svg?style=flat-square
 [rust-version]: #rust-version-policy
 
-[cargo-badge-client]: https://img.shields.io/crates/v/portal-client.svg?style=flat-square
+[cargo-badge-client]: https://img.shields.io/crates/v/portal-client.svg?style=flat-square&label=portal-client
 [cargo-client]: https://crates.io/crates/portal-client
-[cargo-badge-lib]: https://img.shields.io/crates/v/portal-lib.svg?style=flat-square
+[cargo-badge-lib]: https://img.shields.io/crates/v/portal-lib.svg?style=flat-square&label=portal-lib
 [cargo-lib]: https://crates.io/crates/portal-lib
 
 [docs-badge-client]: https://docs.rs/portal-client/badge.svg?style=flat-square
