@@ -16,14 +16,14 @@
 //! use portal_lib::{Portal,Direction};
 //!
 //! // receiver
-//! let dir = Direction::Receiver;
+//! let id = "id".to_string();
 //! let pass ="test".to_string();
-//! let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+//! let (mut receiver,receiver_msg) = Portal::init(Direction::Receiver,id,pass,None);
 //!
 //! // sender
-//! let dir = Direction::Sender;
+//! let id = "id".to_string();
 //! let pass ="test".to_string();
-//! let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+//! let (mut sender,sender_msg) = Portal::init(Direction::Sender,id,pass,None);
 //!
 //! // Both clients should derive the same key
 //! receiver.derive_key(&sender_msg).unwrap();

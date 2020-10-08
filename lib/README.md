@@ -13,54 +13,87 @@ This crate enables a consumer to:
 ### Example of SPAKE2 key negotiation:
 
 ```rust
+use portal_lib::{Portal,Direction};
+
 // receiver
-let dir = Some(Direction::Receiver);
+let id = "id".to_string();
 let pass ="test".to_string();
-let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+let (mut receiver,receiver_msg) = Portal::init(Direction::Receiver,id,pass,None);
 
 // sender
-let dir = Some(Direction::Sender);
+let id = "id".to_string();
 let pass ="test".to_string();
-let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+let (mut sender,sender_msg) = Portal::init(Direction::Sender,id,pass,None);
 
-receiver.confirm_peer(&sender_msg).unwrap();
-sender.confirm_peer(&receiver_msg).unwrap();
-
-assert_eq!(receiver.key,sender.key);
+// Both clients should derive the same key
+receiver.derive_key(&sender_msg).unwrap();
+sender.derive_key(&receiver_msg).unwrap();
 ```
+
+You can use the confirm_peer() method to verify that a remote peer has derived the same key as you, as long as the communication stream implements the std::io::Read and std::io::Write traits.
 
 ### Example of Sending a file:
 
 ```rust
-// open file read-only for sending
-let mut file = portal.load_file(fpath)?;
+use portal_lib::{Portal,Direction};
+use std::net::TcpStream;
+use std::io::Write;
+
+let mut client = TcpStream::connect("127.0.0.1:34254").unwrap();
+
+// Create portal request as the Sender
+let id = "id".to_string();
+let pass ="test".to_string();
+let (mut portal,msg) = Portal::init(Direction::Sender,id,pass,None);
+
+// complete key derivation + peer verification
+
+let mut file = portal.load_file("/tmp/test").unwrap();
 
 // Encrypt the file and share state 
-file.encrypt()?;
-file.sync_file_state(&mut client)?;
+file.encrypt().unwrap();
+file.sync_file_state(&mut client).unwrap();
 
-// Get an iterator over the file in chunks
-let chunks = portal.get_chunks(&file,portal::CHUNK_SIZE);
-
-// Iterate over the chunks sending the via the client TcpStream 
-for data in chunks.into_iter() {
-    client.write_all(&data)?;
-    total += data.len(); 
+for data in file.get_chunks(portal_lib::CHUNK_SIZE) {
+    client.write_all(&data).unwrap();
 }
 ```
 
 ### Example of Receiving a file:
 
 ```rust
+use portal_lib::{Portal,Direction};
+use std::net::TcpStream;
+use std::io::Write;
+
+let mut client = TcpStream::connect("127.0.0.1:34254").unwrap();
+
+// receiver
+let dir = Direction::Receiver;
+let pass ="test".to_string();
+let (mut portal,msg) = Portal::init(dir,"id".to_string(),pass,None);
+
+// serialize & send request
+let request = portal.serialize().unwrap();
+client.write_all(&request).unwrap();
+
+// get response
+let response = Portal::read_response_from(&client).unwrap();
+
+// complete key derivation + peer verification
+
 // create outfile
-let mut file = portal.create_file(&fname, fsize)?;
+let fsize = response.get_file_size();
+let mut file = portal.create_file("/tmp/test", fsize).unwrap();
+
+let callback = |x| { println!("Received {} bytes",x); };
 
 // Receive until connection is done
-let len = match file.download_file(&client,|x| {pb.set_position(x)})?;
+let len = file.download_file(&client,callback).unwrap();
 
 assert_eq!(len as u64, fsize);
 
 // Decrypt the file
-file.decrypt()?;
+file.decrypt().unwrap();
 ```
 
