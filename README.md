@@ -1,14 +1,14 @@
 
-## Portal 
-
-[![crates.io](https://img.shields.io/crates/v/portal-lib.svg)](https://crates.io/crates/portal-lib)
-[![Documentation](https://docs.rs/portal-lib/badge.svg)](https://docs.rs/portal-lib)
-![Apache2/MIT licensed][license-image]
-![Rust Version][rustc-image]
+## Portal  
+[![cargo-badge-lib][]][cargo-lib] [![docs-badge-lib][]][docs-lib] [![license-badge][]][license] [![rust-version-badge][]][rust-version] [![build][]][build-url] [![codecov][]][codecov-url]  
 
 Securely & quickly transport your files.
 
-### Client Install
+
+### Client Install 
+[![cargo-badge-client][]][cargo-client] 
+
+The client binary can be installed via Cargo:
 
 ```
 cargo install portal-client
@@ -78,5 +78,23 @@ This tool works extremely similarly to Wormhole written by [Brian Warner](https:
 
 
 [//]: # (badges)
-[license-image]: https://img.shields.io/badge/license-Apache2.0/MIT-blue.svg
-[rustc-image]: https://img.shields.io/badge/rustc-1.41+-blue.svg
+[license-badge]: https://img.shields.io/badge/license-MIT/Apache--2.0-lightgray.svg?style=flat-square
+[license]: #license
+[rust-version-badge]: https://img.shields.io/badge/rust-latest%20stable-blue.svg?style=flat-square
+[rust-version]: #rust-version-policy
+
+[cargo-badge-client]: https://img.shields.io/crates/v/portal-client.svg?style=flat-square&label=portal-client
+[cargo-client]: https://crates.io/crates/portal-client
+[cargo-badge-lib]: https://img.shields.io/crates/v/portal-lib.svg?style=flat-square&label=portal-lib
+[cargo-lib]: https://crates.io/crates/portal-lib
+
+[docs-badge-client]: https://docs.rs/portal-client/badge.svg?style=flat-square
+[docs-client]: https://docs.rs/portal-client
+[docs-badge-lib]: https://docs.rs/portal-lib/badge.svg?style=flat-square
+[docs-lib]: https://docs.rs/portal-lib
+
+[codecov]: https://img.shields.io/codecov/c/github/landhb/portal?style=flat-square
+[codecov-url]: https://codecov.io/gh/landhb/portal
+
+[build]: https://img.shields.io/github/workflow/status/landhb/portal/Build/master?style=flat-square
+[build-url]: https://github.com/landhb/portal/actions?query=workflow%3ABuild

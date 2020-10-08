@@ -1,9 +1,7 @@
 // Disable warnings
-
 #[allow(unused_macros)]
 
 // The debug version
-
 #[cfg(debug_assertions)]
 #[macro_export]
 macro_rules! log {

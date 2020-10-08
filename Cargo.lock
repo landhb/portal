@@ -442,6 +442,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crypto-mac"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b584a330336237c1eecd3e94266efb216c56ed91225d634cb2991c5f3fd1aeab"
+dependencies = [
+ "generic-array 0.14.4",
+ "subtle 2.3.0",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "1.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -707,7 +717,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35e8f9d776bbe83f1ff24951f7cc19140fb7ff8d0378463c4c4955f6b0d3e503"
 dependencies = [
  "digest 0.8.1",
- "hmac",
+ "hmac 0.7.1",
+]
+
+[[package]]
+name = "hkdf"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe1149865383e4526a43aee8495f9a325f0b806c63ce6427d06336a590abbbc9"
+dependencies = [
+ "digest 0.9.0",
+ "hmac 0.8.1",
 ]
 
 [[package]]
@@ -716,8 +736,18 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5dcb5e64cda4c23119ab41ba960d1e170a774c8e4b9d9e6a9bc18aabf5e59695"
 dependencies = [
- "crypto-mac",
+ "crypto-mac 0.7.0",
  "digest 0.8.1",
+]
+
+[[package]]
+name = "hmac"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "126888268dcc288495a26bf004b38c5fdbb31682f992c84ceb046a1f0fe38840"
+dependencies = [
+ "crypto-mac 0.8.0",
+ "digest 0.9.0",
 ]
 
 [[package]]
@@ -776,6 +806,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
+name = "lazycell"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
+
+[[package]]
 name = "libc"
 version = "0.2.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -823,6 +859,18 @@ dependencies = [
  "net2",
  "slab",
  "winapi 0.2.8",
+]
+
+[[package]]
+name = "mio-extras"
+version = "2.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52403fe290012ce777c4626790c8951324a2b9e3316b3143779c72b029742f19"
+dependencies = [
+ "lazycell",
+ "log",
+ "mio",
+ "slab",
 ]
 
 [[package]]
@@ -974,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "portal-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-std",
@@ -993,12 +1041,13 @@ dependencies = [
 
 [[package]]
 name = "portal-lib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bincode",
  "chacha20poly1305",
  "hex 0.4.2",
+ "hkdf 0.9.0",
  "memmap",
  "rand 0.7.3",
  "serde",
@@ -1009,14 +1058,17 @@ dependencies = [
 
 [[package]]
 name = "portal-relay"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "daemonize",
+ "lazy_static",
  "libc",
  "mio",
+ "mio-extras",
  "os_pipe",
  "portal-lib",
+ "threadpool",
 ]
 
 [[package]]
@@ -1324,7 +1376,7 @@ checksum = "363b721158126474100d7f9ff9e5ce11d1866042787de6834e19cc20c8112f6f"
 dependencies = [
  "curve25519-dalek",
  "hex 0.3.2",
- "hkdf",
+ "hkdf 0.7.1",
  "num-bigint",
  "rand 0.6.5",
  "sha2 0.8.2",
@@ -1421,6 +1473,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "threadpool"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
+dependencies = [
+ "num_cpus",
 ]
 
 [[package]]
