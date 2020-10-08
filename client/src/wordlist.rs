@@ -1,22 +1,21 @@
 use rand::Rng;
 use std::collections::HashMap;
 
-/** 
+/**
  * Generates a pass-phrase with the EFF's dice generated
  * word list
  *
  * https://www.eff.org/dice
  */
 pub fn gen_phrase(count: usize) -> String {
-    
-    let mut phrase = vec!();
+    let mut phrase = vec![];
 
     let mut rng = rand::thread_rng();
     let mut get_index = || {
         let mut pos = 1;
         let mut res = 0;
         for _i in 0..5 {
-            res += rng.gen_range(1, 6)*pos;
+            res += rng.gen_range(1, 6) * pos;
             pos *= 10;
         }
         res
@@ -32,7 +31,7 @@ pub fn gen_phrase(count: usize) -> String {
 
 lazy_static! {
     pub static ref WORDS: HashMap<u32, &'static str> = {
-        let mut words = HashMap::new(); 
+        let mut words = HashMap::new();
         words.insert(11111, "abacus");
         words.insert(11112, "abdomen");
         words.insert(11113, "abdominal");
