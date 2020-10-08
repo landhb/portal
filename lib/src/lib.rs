@@ -107,7 +107,7 @@ use std::fs::OpenOptions;
 use hkdf::Hkdf;
 
 // Key Exchange
-use spake2::{Ed25519Group, Identity, Password, SPAKE2,Group};
+use spake2::{Ed25519Group, Identity, Password, SPAKE2};
 use sha2::{Sha256, Digest};
 
 // File encryption
@@ -301,7 +301,6 @@ impl Portal {
     pub fn read_confirmation_from<R>(mut reader: R) -> Result<PortalConfirmation> 
     where
        R: std::io::Read {
-        assert_eq!(33,Portal::get_peer_msg_size());
         let mut res: PortalConfirmation= [0u8;33];
         reader.read_exact(&mut res)?;
         Ok(res)
@@ -484,12 +483,7 @@ impl Portal {
     }
 
 
-    fn get_peer_msg_size() -> usize {
-        // The exchanged message is the CompressedEdwardsY + 1 byte for the SPAKE direction
-        let edwards_point = <spake2::Ed25519Group as Group>::Element::default();
-        let compressed = edwards_point.compress();
-        std::mem::size_of_val(&compressed)+1
-    }
+   
 
 }
 
@@ -636,6 +630,71 @@ mod tests {
 
         // will panic due to lack of peer
         let _file_src = portal.load_file("/etc/passwd").unwrap();
+    }
+
+    #[test]
+    fn test_file_trim() {
+
+        let file = Some("/my/path/filename.txt".to_string());
+
+        let dir = Direction::Receiver;
+        let pass ="test".to_string();
+        let (receiver,_receiver_msg) = Portal::init(dir,"id".to_string(),pass,file);
+
+        let result = receiver.get_file_name().unwrap();
+
+        assert_eq!(result, "filename.txt");
+    }
+
+    #[test]
+    fn test_compressed_edwards_size() {
+        
+        // The exchanged message is the CompressedEdwardsY + 1 byte for the SPAKE direction
+        let edwards_point = <spake2::Ed25519Group as spake2::Group>::Element::default();
+        let compressed = edwards_point.compress();
+        let msg_size: usize = std::mem::size_of_val(&compressed)+1;
+
+        assert_eq!(33,msg_size);
+    }
+
+    #[test]
+    fn test_getters_setters() {
+        let dir = Direction::Sender;
+        let pass = "test".to_string();
+        let (mut portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
+
+        // get/set ID
+        portal.set_id("newID".to_string());
+        assert_eq!("newID",portal.get_id());
+
+        // get/set direction
+        portal.set_direction(Direction::Receiver);
+        assert_eq!(portal.get_direction(),Direction::Receiver);
+
+        // get/set direction
+        portal.set_file_size(25);
+        assert_eq!(portal.get_file_size(),25);
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let dir = Direction::Sender;
+        let pass = "test".to_string();
+        let (portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
+
+        let ser = portal.serialize().unwrap();
+        let res = Portal::parse(&ser).unwrap();
+
+        // fields that should be the same
+        assert_eq!(res.id, portal.id);
+        assert_eq!(res.direction, portal.direction);
+        assert_eq!(res.filename, portal.filename);
+        assert_eq!(res.filesize, portal.filesize);
+
+        // fields that shouldn't have been serialized
+        assert_ne!(res.state, portal.state);
+        assert_eq!(res.state, None);
+        assert_eq!(res.key, None);
     }
 
 }

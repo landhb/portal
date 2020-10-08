@@ -156,3 +156,39 @@ impl PortalFile {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    
+    use crate::{Portal,Direction};
+
+    #[test]
+    fn test_encrypt_decrypt() {
+
+        // receiver
+        let dir = Direction::Receiver;
+        let pass ="test".to_string();
+        let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+
+        // sender
+        let dir = Direction::Sender;
+        let pass ="test".to_string();
+        let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+
+        // we need a key to be able to encrypt
+        receiver.derive_key(sender_msg.as_slice()).unwrap();
+        sender.derive_key(receiver_msg.as_slice()).unwrap();
+
+
+        let mut file = sender.load_file("/etc/passwd").unwrap();
+
+        let file_before = String::from_utf8((&file.mmap[..]).to_vec());
+        file.encrypt().unwrap();
+        let file_encrypted = String::from_utf8((&file.mmap[..]).to_vec());
+        file.decrypt().unwrap();
+        let file_after = String::from_utf8((&file.mmap[..]).to_vec());
+
+        assert_ne!(file_before, file_encrypted);
+        assert_eq!(file_before, file_after);
+    }
+}
