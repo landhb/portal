@@ -39,6 +39,8 @@ jobs:
           toolchain: stable
           target: x86_64-unknown-linux-musl
           override: false
+    - name: Install musl
+      run: sudo apt install musl-tools
     - name: Build
       run: cargo build --target x86_64-unknown-linux-musl --verbose
     - name: Run tests
@@ -56,6 +58,8 @@ jobs:
           toolchain: stable
           target: x86_64-pc-windows-gnu
           override: false
+    - name: Install mingw
+    - run: sudo apt install mingw-w64
     - name: Build
       run: cargo build --bin portal --target x86_64-pc-windows-gnu --verbose
 
