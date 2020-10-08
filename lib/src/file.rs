@@ -45,8 +45,8 @@ impl PortalFile {
 
     pub fn init(mmap: MmapMut, cipher: ChaCha20Poly1305) -> PortalFile {
         PortalFile{
-            mmap: mmap,
-            cipher: cipher,
+            mmap,
+            cipher,
             pos: 0,
             state: StateMetadata {
                 nonce: Vec::new(),

@@ -27,8 +27,7 @@ pub fn gen_phrase(count: usize) -> String {
         phrase.push(*WORDS.get(&y).unwrap());
     }
 
-    let r = phrase.join("-");
-    r.to_string()
+    phrase.join("-")
 }
 
 lazy_static! {

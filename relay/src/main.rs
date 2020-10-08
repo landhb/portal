@@ -104,17 +104,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Setup the server socket.
     let addr = format!("0.0.0.0:{}",portal::DEFAULT_PORT).parse()?;
-    let mut server = TcpListener::bind(&addr)?;
+    let server = TcpListener::bind(&addr)?;
 
     // Start listening for incoming connections.
-    poll.register(&mut server, SERVER, Ready::readable(), PollOpt::edge())?;
+    poll.register(&server, SERVER, Ready::readable(), PollOpt::edge())?;
 
     // Pre-allocate a few registration threads
     let thread_pool = ThreadPool::new(4);
 
     // Create a channel to receive pairs from threads
-    let (tx, mut rx) = channel::<EndpointPair>();
-    poll.register(&mut rx, CHANNEL, Ready::readable(), PollOpt::edge())?;
+    let (tx, rx) = channel::<EndpointPair>();
+    poll.register(&rx, CHANNEL, Ready::readable(), PollOpt::edge())?;
 
     // Active endpoint pairs
     let id_lookup: Rc<RefCell<HashMap<Token, String>>> = Rc::new(RefCell::new(HashMap::new()));
@@ -173,22 +173,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                  * will be sent over an MPSC channel to be added to the list of file descriptors
                  * we're polling 
                  */
-                CHANNEL => {
-                    let mut pair = match rx.try_recv() {
-                        Ok(p) => p,
-                        Err(_) => {continue;},
-                    };
-
+                CHANNEL => while let Ok(mut pair) = rx.try_recv() {
 
                     pair.sender_token = next(&mut unique_token);
                     pair.receiver_token =  next(&mut unique_token);
 
-                    poll.register(&mut pair.sender.stream, pair.sender_token, Ready::readable()|Ready::writable(),PollOpt::edge())?;
-                    poll.register(&mut pair.receiver.stream, pair.receiver_token, Ready::readable(),PollOpt::level())?;
+                    poll.register(&pair.sender.stream, pair.sender_token, Ready::readable()|Ready::writable(),PollOpt::edge())?;
+                    poll.register(&pair.receiver.stream, pair.receiver_token, Ready::readable(),PollOpt::level())?;
 
-                    id_lookup.borrow_mut().entry(pair.sender_token).or_insert(pair.sender.id.clone());
-                    id_lookup.borrow_mut().entry(pair.receiver_token).or_insert(pair.sender.id.clone());
-                    endpoints.borrow_mut().entry(pair.sender.id.clone()).or_insert(pair);
+                    id_lookup.borrow_mut().entry(pair.sender_token).or_insert_with(|| pair.sender.id.clone());
+                    id_lookup.borrow_mut().entry(pair.receiver_token).or_insert_with(|| pair.sender.id.clone());
+                    endpoints.borrow_mut().entry(pair.sender.id.clone()).or_insert_with(|| pair);
 
                 }
                 /*
@@ -267,10 +262,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // Shutdown this endpoint
                         poll.deregister(&endpoint.stream)?;
                         let id = id_lookup.borrow_mut().remove(&token);
-                        match endpoint.stream.shutdown(std::net::Shutdown::Both) {
-                                Ok(_) => {},
-                                Err(_) => {},
-                        }
+                        if endpoint.stream.shutdown(std::net::Shutdown::Both).is_ok() {} // ignore shutdown errors
 
                         // close the write end of the pipe, otherwise splice() will continually
                         // return EWOULDBLOCK intead of knowing when there is no data left
@@ -281,8 +273,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         peer.has_peer = false;
 
                         // If our peer is also gone, remove the entire EndpointPair
-                        if endpoint.has_peer == false {
-                            let _ = ref_endpoints.remove(&id.unwrap_or("none".to_string()));
+                        if !endpoint.has_peer {
+                            let _ = ref_endpoints.remove(&id.unwrap_or_else(|| "none".to_string()));
                         }
                     }
                 }

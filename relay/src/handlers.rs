@@ -4,17 +4,12 @@ use crate::Endpoint;
 use anyhow::Result;
 use std::os::unix::io::AsRawFd;
 use crate::{log,MAX_SPLICE_SIZE};
-use portal::Direction;
 
 /**
  *  Handles TCP splicing without utilizing a userpace intermediary buffer
  *
- *  READABLE: Transfer data from Sender socket -> pipe
- *  WRITEABLE: Transfer data from pipe -> Reciever socket
- *
- *  The data will be transfered from:
- *   
- *  Sender socket -> Pipe -> Reciever Socket
+ *  When the src_fd is readable, we will attempt to splice data into the dst_fd,
+ *  using an intermediary pipe
  */
 pub fn tcp_splice (
     endpoint: &Endpoint,
@@ -35,7 +30,7 @@ pub fn tcp_splice (
 
         unsafe {
             *libc::__errno_location() = 0;
-            rx = libc::splice(src_fd, 0 as *mut libc::loff_t, p_in, 0 as *mut libc::loff_t, MAX_SPLICE_SIZE, libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);  
+            rx = libc::splice(src_fd, std::ptr::null_mut::<libc::loff_t>(), p_in, std::ptr::null_mut::<libc::loff_t>(), MAX_SPLICE_SIZE, libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);  
         }
 
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
@@ -46,9 +41,9 @@ pub fn tcp_splice (
             return Ok(true);
         }
 
-        // We cannot break here on EWOULDBLOCK since the first splice may return EWOULDBLOCK
-        // if the pipe is full, in that case we'd still want to complete the second splice 
-        // to clear the pipe
+        /* We cannot break here on EWOULDBLOCK since the first splice may return EWOULDBLOCK
+         * if the pipe is full, in that case we'd still want to complete the second splice 
+         * to clear the pipe */
 
         // Done reading
         if rx == 0 {
@@ -56,7 +51,7 @@ pub fn tcp_splice (
         } 
 
         unsafe {
-            tx = libc::splice(p_out, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, MAX_SPLICE_SIZE,  libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);    
+            tx = libc::splice(p_out, std::ptr::null_mut::<libc::loff_t>(), dst_fd, std::ptr::null_mut::<libc::loff_t>(), MAX_SPLICE_SIZE,  libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);    
         }
 
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
@@ -105,7 +100,7 @@ pub fn drain_pipe(
     unsafe { let errno = libc::__errno_location(); *errno = 0;}
     loop  { 
         unsafe {
-            trx = libc::splice(src_fd, 0 as *mut libc::loff_t, dst_fd, 0 as *mut libc::loff_t, MAX_SPLICE_SIZE,libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);     
+            trx = libc::splice(src_fd, std::ptr::null_mut::<libc::loff_t>(), dst_fd, std::ptr::null_mut::<libc::loff_t>(), MAX_SPLICE_SIZE,libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK);     
         }
 
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap();

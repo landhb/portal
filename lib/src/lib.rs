@@ -189,14 +189,14 @@ impl Portal {
             filename = Some(f.to_string());
         }
 
-        return (Portal {
-            direction: direction,
+        (Portal {
+            direction,
             id: id_hash,
-            filename: filename,
+            filename,
             filesize: 0,
             state: Some(s1),
             key: None,
-        }, outbound_msg);
+        }, outbound_msg)
     }
 
     /**
@@ -224,7 +224,7 @@ impl Portal {
     /**
      * Attempt to deserialize from a vector
      */
-    pub fn parse(data: &Vec<u8>) -> Result<Portal> {
+    pub fn parse(data: &[u8]) -> Result<Portal> {
         Ok(bincode::deserialize(&data)?)
     }
 
@@ -380,7 +380,7 @@ impl Portal {
                     return Ok(());
                 }
 
-                return Err(PortalError::BadMsg.into());
+                Err(PortalError::BadMsg.into())
             }
         }
 

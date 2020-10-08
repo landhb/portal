@@ -10,7 +10,7 @@ impl<'a, T: 'a> PortalChunks<'a, T> {
     pub fn init(data: &'a [T], chunk_size: usize) -> PortalChunks<'a,T> {
         PortalChunks{
             v: data, 
-            chunk_size: chunk_size,
+            chunk_size,
         }
     }
 }

@@ -9,7 +9,6 @@ use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 use colored::*;
 use serde::{Serialize, Deserialize};
-use confy;
 use dns_lookup::lookup_host;
 use directories::UserDirs;
 
@@ -270,7 +269,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             // Parse ID from password
             let mut pass = pass.split('-');
-            let id = pass.nth(0).unwrap().to_string();
+            let id = pass.next().unwrap().to_string();
             let opass = pass.collect::<Vec<&str>>().join("-");
 
             let (req,msg) = Portal::init(

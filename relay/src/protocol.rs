@@ -19,7 +19,7 @@ const PLACEHOLDER: usize = 0;
 pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<EndpointPair>)  -> Result<(), Box<dyn Error>>  {
 
     let mut received_data = Vec::with_capacity(1024);
-    while received_data.len() == 0 {
+    while received_data.is_empty() {
         match networking::recv_generic(&mut connection,&mut received_data) {
             Ok(v) if v < 0 => {break;}, // done recieving
             Ok(_) => {},
@@ -116,10 +116,10 @@ pub fn register(mut connection: TcpStream, tx: mio_extras::channel::Sender<Endpo
             // Kill the connection if this ID is being used by another pending sender
             let search = ref_endpoints.iter()
             .find_map(|(key, val)| if *val.id == *id  { Some(key) } else { None });
-            match search {
-                Some(_) => {return Ok(());}
-                None => {}
-            };
+
+            if search.is_some() {
+                return Ok(());
+            }
 
             // This pipe will be used to send data from Sender->Receiver
             let (reader, mut writer) = pipe().unwrap();
