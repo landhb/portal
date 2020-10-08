@@ -30,7 +30,7 @@
 //! sender.derive_key(&receiver_msg).unwrap();
 //! 
 //! ```
-//! You can use the confirm_peer() method to verify that a remote peer has derived the same key 
+//! You can use the `Portal::confirm_peer()` method to verify that a remote peer has derived the same key 
 //! as you, as long as the communication stream implements the std::io::Read and std::io::Write traits.
 //!
 //! Example of Sending a file:
@@ -648,7 +648,7 @@ mod tests {
 
     #[test]
     fn test_compressed_edwards_size() {
-        
+
         // The exchanged message is the CompressedEdwardsY + 1 byte for the SPAKE direction
         let edwards_point = <spake2::Ed25519Group as spake2::Group>::Element::default();
         let compressed = edwards_point.compress();

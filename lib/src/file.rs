@@ -91,7 +91,11 @@ impl PortalFile {
         }
     }
 
-
+    /** 
+     * Writes the nonce and tag for this file to the provided writer. Use
+     * after encrypting a file to communicate state data to the peer that will
+     * decrypt the file
+     */
     pub fn sync_file_state<W>(&mut self, mut writer: W) -> Result<usize> 
     where 
         W: std::io::Write {
@@ -100,6 +104,17 @@ impl PortalFile {
         Ok(data.len())
     }
 
+    /** 
+     * Downloads a file, first by retrieving the Tag and Nonce communicated by 
+     * sync_file_state() and then reading in the file until EOF
+     *
+     * ```ignore
+     * Peer A                  Peer B
+     * encrypt()               download_file()
+     * sync_file_state()       decrypt()
+     * // send chunks
+     * ```
+     */
     pub fn download_file<R,F>(&mut self,mut reader: R, callback: F) -> Result<u64>
     where 
         R: std::io::Read, 
@@ -149,6 +164,10 @@ impl PortalFile {
         )
     }
 
+
+    /** 
+     * Writes the provided data to the file in-memory at the current position
+     */
     pub fn write_given_chunk(&mut self,data: &[u8]) -> Result<u64> {
         (&mut self.mmap[self.pos..]).write_all(&data)?;
         self.pos += data.len();
