@@ -1,5 +1,3 @@
-//! file.rs
-//! 
 //! Provides an interface into the PortalFile abstraction
 //!
 
@@ -13,12 +11,13 @@ use chacha20poly1305::{Nonce,Tag,aead::AeadInPlace};
 
 
 use crate::errors::PortalError;
+use crate::chunks::PortalChunks;
 
 
 
 /**
- * A file mapping, either an immutable mmap 
- * or a mutable std::fs::File wrapped in a RefCell
+ * A file mapping that contains state to
+ * encrypt/decrypt files in memory
  */
 pub struct PortalFile {
     // Memory mapped file
@@ -60,16 +59,16 @@ impl PortalFile {
         }
     }
 
-    /// Encrypts the current PortalFile, by encrypting the mmap'd memory in-place
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    ///
-    /// ```
-    /// let file = portal.load_file("/tmp/file");
-    /// let result: Result<()> = file.encrypt();
-    /// ```
+    /** 
+     * Encrypts the current PortalFile, by encrypting the mmap'd memory in-place
+     *
+     * # Examples
+     *
+     * ```
+     * let file = portal.load_file("/tmp/file");
+     * let result: Result<()> = file.encrypt();
+     * ```
+     */
     pub fn encrypt(&mut self) -> Result<()> {
 
         // Generate random nonce
@@ -87,16 +86,16 @@ impl PortalFile {
 
     }
 
-    /// Decrypts the current PortalFile, by decrypting the mmap'd memory in-place
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    ///
-    /// ```
-    /// let file = portal.load_file("/tmp/file");
-    /// let result: Result<()> = file.decrypt();
-    /// ```
+    /** 
+     * Decrypts the current PortalFile, by decrypting the mmap'd memory in-place
+     *
+     * # Examples
+     *    
+     * ```
+     * let file = portal.load_file("/tmp/file");
+     * let result: Result<()> = file.decrypt();
+     * ```
+     */
     pub fn decrypt(&mut self) -> Result<()> {
         let nonce = Nonce::from_slice(&self.state.nonce);
         let tag = Tag::from_slice(&self.state.tag);
@@ -141,6 +140,27 @@ impl PortalFile {
             self.pos += len;
             callback(self.pos as u64);
         }
+    }
+
+    /**
+     * Returns an iterator over the chunks to send it over the
+     * network
+     *
+     * # Examples
+     *     
+     * ```
+     * for data in file.get_chunks(portal::CHUNK_SIZE) {
+     *      client.write_all(&data)?
+     *      total += data.len();
+     *      pb.set_position(total as u64);
+     * }
+     * ```
+     */
+    pub fn get_chunks<'a>(&'a self, chunk_size: usize) -> impl std::iter::Iterator<Item=&'a [u8]> {
+        PortalChunks::init(
+            &self.mmap[..], // TODO: verify that this is zero-copy
+            chunk_size,
+        )
     }
 
     pub fn write_given_chunk(&mut self,data: &[u8]) -> Result<u64> {

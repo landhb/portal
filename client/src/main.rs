@@ -167,10 +167,9 @@ fn transfer(
             file.sync_file_state(&mut client)?;
             println!("{}", "Ok!".green());
 
-            // This will be empty for files created with create_file()
-            let chunks = portal.get_chunks(&file, portal::CHUNK_SIZE);
-
-            for data in chunks.into_iter() {
+            // iterate over the file in chunks, attempting to send
+            // each one 
+            for data in file.get_chunks(portal::CHUNK_SIZE) {
                 match client.write_all(&data) {
                     Ok(_) => {}
                     Err(_) => {

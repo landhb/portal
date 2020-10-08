@@ -1,8 +1,5 @@
-//! chunks.rs
-//! 
 //! Provides an chunks based iterator over a PortalFile
 //!
-
 
 
 /**

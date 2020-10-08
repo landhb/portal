@@ -106,7 +106,6 @@ mod chunks;
 
 use errors::PortalError;
 use file::PortalFile;
-use chunks::PortalChunks;
 
 /**
  * Arbitrary port for the Portal protocol
@@ -120,7 +119,9 @@ pub const CHUNK_SIZE: usize = 65535;
 
 
 /**
- * The primary interface into the library
+ * The primary interface into the library. The Portal struct
+ * contains data associated with either a new request or a response
+ * from a peer.
  */
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct Portal{
@@ -143,6 +144,12 @@ pub struct Portal{
     #[serde(skip)]
     key: Option<Vec<u8>>,
 }
+
+/**
+ * A data format exchanged by each peer to derive 
+ * the shared session key
+ */
+pub type PortalConfirmation = [u8;33];
 
 
 /**
@@ -175,6 +182,18 @@ impl Portal {
     
     /**
      * Initialize a new portal request
+     *
+     * # Example
+     *
+     * ```
+     * use portal_lib::{Portal,Direction};
+     * 
+     * // the shared password should be secret and hard to guess/crack
+     * // see the portal-client as an example of potential usage
+     * let id = "my client ID".to_string();
+     * let password = "testpasswd".to_string(); 
+     * let portal = Portal::init(Direction::Sender,id,password,None);
+     * ```
      */
     pub fn init(direction: Direction, 
                 id: String,
@@ -210,7 +229,46 @@ impl Portal {
     }
 
     /**
-     * Construct from a stream reader, consuming the bytes
+     * Initialize with existing data, attempting to deserialize bytes 
+     * into a Portal struct
+     *
+     * # Example
+     *
+     * ```
+     * use portal_lib::Portal;
+     * fn example(client: std::net::TcpStream) { 
+     *     let mut buf = [0; 1024];
+     *     let len = connection.read(&mut buf);
+     *     let response = match Portal::parse(&buf) {
+     *          Ok(r) => r,
+     *          Err(_) => {
+     *               println!("Failed to read request/response...");
+     *          }
+     *     }
+     * }
+     * ```
+     */
+    pub fn parse(data: &[u8]) -> Result<Portal> {
+        Ok(bincode::deserialize(&data)?)
+    }
+
+    /**
+     * Initialize by reading from a stream that implements the 
+     * std::io::Read trait, consuming the bytes
+     *
+     * # Example
+     *
+     * ```
+     * use portal_lib::Portal;
+     * fn example(client: std::net::TcpStream) { 
+     *     let response = match Portal::read_response_from(&client) {
+     *          Ok(r) => r,
+     *          Err(_) => {
+     *               println!("Failed to read response...");
+     *          }
+     *     }
+     * }
+     * ```
      */
     pub fn read_response_from<R>(reader: R) -> Result<Portal> 
     where
@@ -220,60 +278,25 @@ impl Portal {
 
     /**
      * Receive the bytes necessary for a confirmation message
-     * from a stream reader, consuming the bytes
+     * from a stream that implements std::io::Read, consuming the bytes
      */
-    pub fn read_confirmation_from<R>(mut reader: R) -> Result<[u8;33]> 
+    pub fn read_confirmation_from<R>(mut reader: R) -> Result<PortalConfirmation> 
     where
        R: std::io::Read {
         assert_eq!(33,Portal::get_peer_msg_size());
-        let mut res = [0u8;33];
+        let mut res: PortalConfirmation= [0u8;33];
         reader.read_exact(&mut res)?;
         Ok(res)
     }
 
     /**
-     * Attempt to deserialize from a vector
+     * Attempt to serialize a Portal struct into a vector
      */
-    pub fn parse(data: &[u8]) -> Result<Portal> {
-        Ok(bincode::deserialize(&data)?)
-    }
-
     pub fn serialize(&self) -> Result<Vec<u8>> {
         Ok(bincode::serialize(&self)?)
     }
 
-    pub fn get_file_size(&self) -> u64 {
-        self.filesize
-    }
-
-    pub fn set_file_size(&mut self, size: u64) {
-        self.filesize = size;
-    } 
-
-    pub fn get_file_name<'a>(&'a self) -> Result<&'a str> {
-        match &self.filename {
-            Some(f) => Ok(f.as_str()),
-            None => Err(PortalError::NoneError.into()),
-        }
-    }
-
-    pub fn get_id(&self) -> &String {
-        &self.id
-    }
-
-    pub fn get_direction(&self) -> Direction {
-        self.direction.clone()
-    }
-
-    pub fn set_id(&mut self, id: String) {
-        self.id = id;
-    }
-
-    pub fn set_direction(&mut self, direction: Direction) {
-        self.direction = direction;
-    }
-
-    /*
+     /*
      * mmap's a file into memory for reading
      */
     pub fn load_file<'a>(&'a self, f: &str) -> Result<PortalFile>  {
@@ -316,23 +339,13 @@ impl Portal {
         Ok(PortalFile::init(mmap,cipher))
     }
 
-    /**
-     * Returns an iterator over the chunks to send it over the
-     * network
-     */
-    pub fn get_chunks<'a>(&self, data: &'a PortalFile, chunk_size: usize) -> PortalChunks<'a,u8> {
-        PortalChunks::init(
-            &data.mmap[..], // TODO: verify that this is zero-copy
-            chunk_size,
-        )
-    }
-
+   
     /**
      * Derive a shared key with the exchanged data
      * at this point in the exchange we have not verified that our peer
      * has derived the same key as us
      */
-    pub fn derive_key(&mut self, msg_data: &[u8]) -> Result<()> {
+    pub fn derive_key(&mut self, msg_data: &PortalConfirmation) -> Result<()> {
 
         // after calling finish() the SPAKE2 struct will be consumed
         // so we must replace the value stored in self.state
@@ -395,6 +408,63 @@ impl Portal {
         }
 
     }
+
+    /**
+     * Returns the file size associated with this request
+     */
+    pub fn get_file_size(&self) -> u64 {
+        self.filesize
+    }
+
+    /**
+     * Sets the file size associated with this request
+     */
+    pub fn set_file_size(&mut self, size: u64) {
+        self.filesize = size;
+    } 
+
+    /**
+     * Returns the file name associated with this request
+     * or a PortalError::NoneError if none exists
+     */
+    pub fn get_file_name<'a>(&'a self) -> Result<&'a str> {
+        match &self.filename {
+            Some(f) => Ok(f.as_str()),
+            None => Err(PortalError::NoneError.into()),
+        }
+    }
+
+    /**
+     * Returns a copy of the Portal::Direction associated with 
+     * this Portal request
+     */
+    pub fn get_direction(&self) -> Direction {
+        self.direction.clone()
+    }
+
+    /**
+     * Sets the Portal::Direction associated with this Poral request
+     */
+    pub fn set_direction(&mut self, direction: Direction) {
+        self.direction = direction;
+    }
+
+
+    /**
+     * Returns a reference to the ID associated with this
+     * Portal request
+     */
+    pub fn get_id(&self) -> &String {
+        &self.id
+    }
+
+    /**
+     * Sets the ID associated with this Poral request
+     */
+    pub fn set_id(&mut self, id: String) {
+        self.id = id;
+    }
+
 
     fn get_peer_msg_size() -> usize {
         // The exchanged message is the CompressedEdwardsY + 1 byte for the SPAKE direction
