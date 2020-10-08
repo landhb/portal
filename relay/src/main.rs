@@ -178,13 +178,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     pair.sender_token = next(&mut unique_token);
                     pair.receiver_token =  next(&mut unique_token);
 
-                    poll.register(&pair.sender.stream, pair.sender_token, Ready::readable()|Ready::writable(),PollOpt::edge())?;
-                    poll.register(&pair.receiver.stream, pair.receiver_token, Ready::readable(),PollOpt::level())?;
+                    poll.register(&pair.sender.stream, pair.sender_token, Ready::readable()| Ready::writable(), PollOpt::edge())?;
+                    poll.register(&pair.receiver.stream, pair.receiver_token, Ready::readable(), PollOpt::level())?;
 
                     id_lookup.borrow_mut().entry(pair.sender_token).or_insert_with(|| pair.sender.id.clone());
                     id_lookup.borrow_mut().entry(pair.receiver_token).or_insert_with(|| pair.sender.id.clone());
                     endpoints.borrow_mut().entry(pair.sender.id.clone()).or_insert_with(|| pair);
-
                 }
                 /*
                  * Any other events indicate there is data we need to channel between two TCP connections

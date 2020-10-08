@@ -100,7 +100,7 @@ use chacha20poly1305::{ChaCha20Poly1305, Key};
 use chacha20poly1305::aead::{NewAead};
 
 pub mod errors;
-mod file;
+pub mod file;
 mod chunks;
 
 
@@ -108,7 +108,14 @@ use errors::PortalError;
 use file::PortalFile;
 use chunks::PortalChunks;
 
+/**
+ * Arbitrary port for the Portal protocol
+ */
 pub const DEFAULT_PORT: u16 = 13265;
+
+/**
+ * Default chunk size
+ */
 pub const CHUNK_SIZE: usize = 65535;
 
 
@@ -138,7 +145,10 @@ pub struct Portal{
 }
 
 
-
+/**
+ * An enum to describe the direction of each file transfer 
+ * participant (i.e Sender/Receiver)
+ */
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum Direction {
     Sender,

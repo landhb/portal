@@ -1,3 +1,8 @@
+//! file.rs
+//! 
+//! Provides an interface into the PortalFile abstraction
+//!
+
 use chacha20poly1305::ChaCha20Poly1305;
 use anyhow::Result;
 use memmap::MmapMut;
@@ -55,6 +60,16 @@ impl PortalFile {
         }
     }
 
+    /// Encrypts the current PortalFile, by encrypting the mmap'd memory in-place
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ```
+    /// let file = portal.load_file("/tmp/file");
+    /// let result: Result<()> = file.encrypt();
+    /// ```
     pub fn encrypt(&mut self) -> Result<()> {
 
         // Generate random nonce
@@ -72,6 +87,16 @@ impl PortalFile {
 
     }
 
+    /// Decrypts the current PortalFile, by decrypting the mmap'd memory in-place
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ```
+    /// let file = portal.load_file("/tmp/file");
+    /// let result: Result<()> = file.decrypt();
+    /// ```
     pub fn decrypt(&mut self) -> Result<()> {
         let nonce = Nonce::from_slice(&self.state.nonce);
         let tag = Tag::from_slice(&self.state.tag);
