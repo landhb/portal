@@ -97,7 +97,7 @@ impl PortalFile {
         W: std::io::Write {
         let data: Vec<u8> = bincode::serialize(&self.state)?;
         writer.write_all(&data)?;
-        Ok(0)
+        Ok(data.len())
     }
 
     pub fn download_file<R,F>(&mut self,mut reader: R, callback: F) -> Result<u64>
@@ -159,8 +159,84 @@ impl PortalFile {
 
 #[cfg(test)]
 mod tests {
-    
     use crate::{Portal,Direction};
+    use std::io::{Read,Write};
+
+    struct MockTcpStream {
+        data: Vec<u8>,
+    }
+
+    impl Read for MockTcpStream {
+        fn read(&mut self, buf: &mut [u8]) -> Result<usize,std::io::Error> {
+            let size: usize = std::cmp::min(self.data.len(), buf.len());
+            buf[..size].copy_from_slice(&self.data[..size]);
+            self.data.drain(0..size);
+            Ok(size)
+        }
+    }
+
+    impl Write for MockTcpStream {
+        fn write(&mut self, buf: &[u8]) -> Result<usize,std::io::Error> {
+            self.data.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> Result<(),std::io::Error> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_sync_file_download_file() {
+
+
+        // receiver
+        let dir = Direction::Receiver;
+        let pass ="test".to_string();
+        let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+
+        // sender
+        let dir = Direction::Sender;
+        let pass ="test".to_string();
+        let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+
+        // we need a key to be able to encrypt
+        receiver.derive_key(sender_msg.as_slice()).unwrap();
+        sender.derive_key(receiver_msg.as_slice()).unwrap();
+
+        // encrypt the file
+        let mut file = sender.load_file("/etc/passwd").unwrap();
+        file.encrypt().unwrap();
+
+
+        let mut stream = MockTcpStream {
+            data: Vec::with_capacity(crate::CHUNK_SIZE),
+        };
+
+
+        // communicate the necessary state info
+        // for the peer to be able to decrypt the file
+        file.sync_file_state(&mut stream).unwrap();
+
+
+        // send the file over the stream
+        for data in file.get_chunks(crate::CHUNK_SIZE) {
+            stream.write(&data).unwrap();
+        }
+
+
+        // use download_file to read in the file data
+        let mut new_file = receiver.create_file("/tmp/passwd",file.mmap[..].len() as u64).unwrap();
+        new_file.download_file(&mut stream, |x| {println!("{:?}", x)}).unwrap();
+
+
+        // compare the state of the two files
+        assert_eq!(&file.state.tag, &new_file.state.tag);
+        assert_eq!(&file.state.nonce, &new_file.state.nonce);
+        assert_eq!(&file.mmap[..], &new_file.mmap[..]);
+
+        new_file.decrypt().unwrap(); // should not panic
+    }
 
     #[test]
     fn test_encrypt_decrypt() {
