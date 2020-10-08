@@ -1,6 +1,6 @@
 
 ## Portal  
-[![cargo-badge-lib][]][cargo-lib] [![docs-badge-lib][]][docs-lib] [![license-badge][]][license] [![rust-version-badge][]][rust-version]  
+[![cargo-badge-lib][]][cargo-lib] [![docs-badge-lib][]][docs-lib] [![license-badge][]][license] [![rust-version-badge][]][rust-version] [![build][]][build-url] [![codecov][]][codecov-url]  
 
 Securely & quickly transport your files.
 
@@ -92,3 +92,9 @@ This tool works extremely similarly to Wormhole written by [Brian Warner](https:
 [docs-client]: https://docs.rs/portal-client
 [docs-badge-lib]: https://docs.rs/portal-lib/badge.svg?style=flat-square
 [docs-lib]: https://docs.rs/portal-lib
+
+[codecov]: https://img.shields.io/codecov/c/github/landhb/portal?style=flat-square
+[codecov-url]: https://codecov.io/gh/landhb/portal
+
+[build]: https://img.shields.io/github/workflow/status/landhb/portal/Build/master?style=flat-square
+[build-url]: https://github.com/landhb/portal/actions?query=workflow%3ABuild
