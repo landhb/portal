@@ -25,62 +25,77 @@
 //! let pass ="test".to_string();
 //! let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 //!
+//! // Both clients should derive the same key
 //! receiver.derive_key(&sender_msg).unwrap();
 //! sender.derive_key(&receiver_msg).unwrap();
-//!
-//! // assert_eq!(receiver.key,sender.key);
+//! 
 //! ```
+//! You can use the confirm_peer() method to verify that a remote peer has derived the same key 
+//! as you, as long as the communication stream implements the std::io::Read and std::io::Write traits.
 //!
 //! Example of Sending a file:
 //!
-//! ```ignore
+//! ```no_run
 //! use portal_lib::{Portal,Direction};
+//! use std::net::TcpStream;
+//! use std::io::Write;
 //!
-//! // sender
-//! let dir = Direction::Sender;
+//! let mut client = TcpStream::connect("127.0.0.1:34254").unwrap();
+//!
+//! // Create portal request as the Sender
+//! let id = "id".to_string();
 //! let pass ="test".to_string();
-//! let (mut portal,msg) = Portal::init(dir,"id".to_string(),pass,None);
-//!
+//! let (mut portal,msg) = Portal::init(Direction::Sender,id,pass,None);
+//! 
 //! // complete key derivation + peer verification
-//!
-//! // open file read-only for sending
-//! let mut file = portal.load_file(fpath)?;
+//! 
+//! let mut file = portal.load_file("/tmp/test").unwrap();
 //!
 //! // Encrypt the file and share state 
-//! file.encrypt()?;
-//! file.sync_file_state(&mut client)?;
+//! file.encrypt().unwrap();
+//! file.sync_file_state(&mut client).unwrap();
 //!
-//! // This will be empty for files created with create_file()
-//! let chunks = portal.get_chunks(&file,portal::CHUNK_SIZE);
-//!
-//! for data in chunks.into_iter() {
-//!     client.write_all(&data)?;
-//!     total += data.len(); 
+//! for data in file.get_chunks(portal_lib::CHUNK_SIZE) {
+//!     client.write_all(&data).unwrap();
 //! }
 //! ```
 //!
 //! Example of Receiving a file:
 //!
-//! ```ignore
+//! ```no_run
 //! use portal_lib::{Portal,Direction};
+//! use std::net::TcpStream;
+//! use std::io::Write;
+//!
+//! let mut client = TcpStream::connect("127.0.0.1:34254").unwrap();
 //!
 //! // receiver
 //! let dir = Direction::Receiver;
 //! let pass ="test".to_string();
 //! let (mut portal,msg) = Portal::init(dir,"id".to_string(),pass,None);
 //!
+//! // serialize & send request
+//! let request = portal.serialize().unwrap();
+//! client.write_all(&request).unwrap();
+//! 
+//! // get response
+//! let response = Portal::read_response_from(&client).unwrap();
+//! 
 //! // complete key derivation + peer verification
 //!
 //! // create outfile
-//! let mut file = portal.create_file(&fname, fsize)?;
+//! let fsize = response.get_file_size();
+//! let mut file = portal.create_file("/tmp/test", fsize).unwrap();
+//!
+//! let callback = |x| { println!("Received {} bytes",x); };
 //!
 //! // Receive until connection is done
-//! let len = file.download_file(&client,|x| {pb.set_position(x)})?;
+//! let len = file.download_file(&client,callback).unwrap();
 //!
 //! assert_eq!(len as u64, fsize);
 //!
 //! // Decrypt the file
-//! file.decrypt()?;
+//! file.decrypt().unwrap();
 //! ```
 
 
@@ -117,6 +132,12 @@ pub const DEFAULT_PORT: u16 = 13265;
  */
 pub const CHUNK_SIZE: usize = 65535;
 
+/**
+ * A data format exchanged by each peer to derive 
+ * the shared session key
+ */
+pub type PortalConfirmation = [u8;33];
+
 
 /**
  * The primary interface into the library. The Portal struct
@@ -144,12 +165,6 @@ pub struct Portal{
     #[serde(skip)]
     key: Option<Vec<u8>>,
 }
-
-/**
- * A data format exchanged by each peer to derive 
- * the shared session key
- */
-pub type PortalConfirmation = [u8;33];
 
 
 /**
@@ -236,15 +251,17 @@ impl Portal {
      *
      * ```
      * use portal_lib::Portal;
-     * fn example(client: std::net::TcpStream) { 
+     * use std::io::Read;
+     * fn example(mut client: std::net::TcpStream) { 
      *     let mut buf = [0; 1024];
-     *     let len = connection.read(&mut buf);
+     *     let len = client.read(&mut buf);
      *     let response = match Portal::parse(&buf) {
      *          Ok(r) => r,
      *          Err(_) => {
      *               println!("Failed to read request/response...");
+     *               return;
      *          }
-     *     }
+     *     };
      * }
      * ```
      */
@@ -265,8 +282,9 @@ impl Portal {
      *          Ok(r) => r,
      *          Err(_) => {
      *               println!("Failed to read response...");
+     *               return;
      *          }
-     *     }
+     *     };
      * }
      * ```
      */
@@ -345,7 +363,7 @@ impl Portal {
      * at this point in the exchange we have not verified that our peer
      * has derived the same key as us
      */
-    pub fn derive_key(&mut self, msg_data: &PortalConfirmation) -> Result<()> {
+    pub fn derive_key(&mut self, msg_data: &[u8]) -> Result<()> {
 
         // after calling finish() the SPAKE2 struct will be consumed
         // so we must replace the value stored in self.state
@@ -492,8 +510,8 @@ mod tests {
         let pass ="test".to_string();
         let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
-        receiver.derive_key(&sender_msg).unwrap();
-        sender.derive_key(&receiver_msg).unwrap();
+        receiver.derive_key(sender_msg.as_slice()).unwrap();
+        sender.derive_key(receiver_msg.as_slice()).unwrap();
 
         assert_eq!(receiver.key,sender.key);
     }
@@ -510,7 +528,7 @@ mod tests {
         let (mut sender,_sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // Confirm
-        sender.derive_key(&receiver_msg).unwrap();
+        sender.derive_key(receiver_msg.as_slice()).unwrap();
 
         // TODO change test file
         let _file = sender.load_file("/etc/passwd").unwrap();
@@ -530,21 +548,19 @@ mod tests {
         let (mut sender,_sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // Confirm
-        sender.derive_key(&receiver_msg).unwrap();
+        sender.derive_key(receiver_msg.as_slice()).unwrap();
 
         // TODO change test file
         let file = sender.load_file("/etc/passwd").unwrap();
 
         let chunk_size = 10;
-        let chunks = sender.get_chunks(&file,chunk_size);
-        for v in chunks.into_iter() {
+        for v in file.get_chunks(chunk_size) {
             assert!(v.len() <= chunk_size);
         }
 
 
         let chunk_size = 1024;
-        let chunks = sender.get_chunks(&file,chunk_size);
-        for v in chunks.into_iter() {
+        for v in file.get_chunks(chunk_size) {
             assert!(v.len() <= chunk_size);
         }
 
@@ -563,8 +579,8 @@ mod tests {
         let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // Confirm
-        sender.derive_key(&receiver_msg).unwrap();
-        receiver.derive_key(&sender_msg).unwrap();
+        sender.derive_key(receiver_msg.as_slice()).unwrap();
+        receiver.derive_key(sender_msg.as_slice()).unwrap();
 
         // TODO change test file
         let _file_dst = receiver.create_file("/tmp/passwd",4096).unwrap();
@@ -583,17 +599,15 @@ mod tests {
         let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
 
         // Confirm
-        sender.derive_key(&receiver_msg).unwrap();
-        receiver.derive_key(&sender_msg).unwrap();
+        sender.derive_key(receiver_msg.as_slice()).unwrap();
+        receiver.derive_key(sender_msg.as_slice()).unwrap();
 
         // TODO change test file
         let file_src = sender.load_file("/etc/passwd").unwrap();
         let mut file_dst = receiver.create_file("/tmp/passwd",4096).unwrap();
 
         let chunk_size = 4096;
-        let chunks = sender.get_chunks(&file_src,chunk_size);
-
-        for v in chunks.into_iter() {
+        for v in file_src.get_chunks(chunk_size) {
 
             assert!(v.len() <= chunk_size);
 

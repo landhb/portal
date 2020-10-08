@@ -61,13 +61,6 @@ impl PortalFile {
 
     /** 
      * Encrypts the current PortalFile, by encrypting the mmap'd memory in-place
-     *
-     * # Examples
-     *
-     * ```
-     * let file = portal.load_file("/tmp/file");
-     * let result: Result<()> = file.encrypt();
-     * ```
      */
     pub fn encrypt(&mut self) -> Result<()> {
 
@@ -88,13 +81,6 @@ impl PortalFile {
 
     /** 
      * Decrypts the current PortalFile, by decrypting the mmap'd memory in-place
-     *
-     * # Examples
-     *    
-     * ```
-     * let file = portal.load_file("/tmp/file");
-     * let result: Result<()> = file.decrypt();
-     * ```
      */
     pub fn decrypt(&mut self) -> Result<()> {
         let nonce = Nonce::from_slice(&self.state.nonce);
@@ -148,7 +134,7 @@ impl PortalFile {
      *
      * # Examples
      *     
-     * ```
+     * ```ignore
      * for data in file.get_chunks(portal::CHUNK_SIZE) {
      *      client.write_all(&data)?
      *      total += data.len();
