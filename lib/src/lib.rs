@@ -104,11 +104,11 @@ use serde::{Serialize, Deserialize};
 use std::fs::File;
 use memmap::MmapOptions;
 use std::fs::OpenOptions;
-use hkdf::Hkdf;
 
 // Key Exchange
 use spake2::{Ed25519Group, Identity, Password, SPAKE2};
 use sha2::{Sha256, Digest};
+use hkdf::Hkdf;
 
 // File encryption
 use chacha20poly1305::{ChaCha20Poly1305, Key}; 
@@ -481,15 +481,15 @@ impl Portal {
     pub fn set_id(&mut self, id: String) {
         self.id = id;
     }
-
-
-   
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Portal,Direction};
+    use sha2::Sha256;
+    use hkdf::Hkdf;
+    use std::io::Write;
+    use crate::file::tests::MockTcpStream;
 
     #[test]
     fn key_derivation() {
@@ -508,6 +508,52 @@ mod tests {
         sender.derive_key(receiver_msg.as_slice()).unwrap();
 
         assert_eq!(receiver.key,sender.key);
+    }
+
+
+    #[test]
+    fn key_confirmation() {
+
+        let mut receiver_side = MockTcpStream {
+            data: Vec::with_capacity(crate::CHUNK_SIZE),
+        };
+
+        let mut sender_side = MockTcpStream {
+            data: Vec::with_capacity(crate::CHUNK_SIZE),
+        };
+
+        // receiver
+        let dir = Direction::Receiver;
+        let pass ="test".to_string();
+        let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+
+        // sender
+        let dir = Direction::Sender;
+        let pass ="test".to_string();
+        let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+
+        receiver.derive_key(sender_msg.as_slice()).unwrap();
+        sender.derive_key(receiver_msg.as_slice()).unwrap();
+
+        // identifiers known to each party
+        let id = receiver.get_id();
+        let sender_info = format!("{}-{}",id,"senderinfo");
+        let receiver_info = format!("{}-{}",id,"receiverinfo");
+
+        // Perform the HKDF operations
+        let h = Hkdf::<Sha256>::new(None,&sender.key.as_ref().unwrap());
+        let mut sender_confirm = [0u8; 42];
+        let mut receiver_confirm = [0u8; 42];
+        h.expand(&sender_info.as_bytes(), &mut sender_confirm).unwrap();
+        h.expand(&receiver_info.as_bytes(), &mut receiver_confirm).unwrap();
+
+        // pre-send the appropriate HKDF to each stream, simulating a peer 
+        receiver_side.write(&sender_confirm).unwrap();
+        sender_side.write(&receiver_confirm).unwrap();
+
+        // each side should be able to confirm the other
+        receiver.confirm_peer(&mut receiver_side).unwrap();
+        sender.confirm_peer(&mut sender_side).unwrap();
     }
 
     #[test]

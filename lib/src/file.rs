@@ -177,12 +177,12 @@ impl PortalFile {
 
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use crate::{Portal,Direction};
     use std::io::{Read,Write};
 
-    struct MockTcpStream {
-        data: Vec<u8>,
+    pub struct MockTcpStream {
+        pub data: Vec<u8>,
     }
 
     impl Read for MockTcpStream {
@@ -255,6 +255,7 @@ mod tests {
         assert_eq!(&file.mmap[..], &new_file.mmap[..]);
 
         new_file.decrypt().unwrap(); // should not panic
+        stream.flush().unwrap(); // just for coverage reporting, does nothing
     }
 
     #[test]
@@ -286,4 +287,5 @@ mod tests {
         assert_ne!(file_before, file_encrypted);
         assert_eq!(file_before, file_after);
     }
+
 }
