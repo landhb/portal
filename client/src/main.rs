@@ -139,9 +139,12 @@ fn transfer(
                 }
             };
 
-            pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
+            if len as u64 != fsize {
+                log_error!("peer disconnected or download did not complete");
+                std::process::exit(-1);
+            }
 
-            assert_eq!(len as u64, fsize);
+            pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
 
             // Decrypt the file
             log_wait!("Decrypting file...");
