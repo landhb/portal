@@ -1,5 +1,5 @@
-use thiserror::Error;
 use std::io;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum PortalError {
@@ -24,5 +24,3 @@ pub enum PortalError {
     #[error("Disconnected")]
     Disconnect(#[from] io::Error),
 }
-
-

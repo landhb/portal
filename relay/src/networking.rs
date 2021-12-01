@@ -1,7 +1,6 @@
-use mio::net::TcpStream;
-use std::io::{self,Read};
 use anyhow::Result;
-
+use mio::net::TcpStream;
+use std::io::{self, Read};
 
 fn would_block(err: &io::Error) -> bool {
     err.kind() == io::ErrorKind::WouldBlock
@@ -11,9 +10,7 @@ fn interrupted(err: &io::Error) -> bool {
     err.kind() == io::ErrorKind::Interrupted
 }
 
-
 pub fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> Result<isize> {
-
     loop {
         let mut buf = [0; 256];
         match connection.read(&mut buf) {
@@ -35,4 +32,3 @@ pub fn recv_generic(connection: &mut TcpStream, received_data: &mut Vec<u8>) -> 
 
     Ok(received_data.len() as isize)
 }
-

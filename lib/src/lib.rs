@@ -1,11 +1,11 @@
 //! portal-lib
 //!
-//! A small Protocol Library for [Portal](https://github.com/landhb/portal) - An encrypted file transfer utility 
+//! A small Protocol Library for [Portal](https://github.com/landhb/portal) - An encrypted file transfer utility
 //!
-//! This crate enables a consumer to: 
+//! This crate enables a consumer to:
 //!
 //! - Create/serialize/deserialize Portal request/response messages.
-//! - Negoticate a symmetric key with a peer using [SPAKE2](https://docs.rs/spake2/0.2.0/spake2) 
+//! - Negoticate a symmetric key with a peer using [SPAKE2](https://docs.rs/spake2/0.2.0/spake2)
 //! - Encrypt files with [Chacha20poly1305](https://blog.cloudflare.com/it-takes-two-to-chacha-poly/) using the [RustCrypto implementation](https://github.com/rusticata/tls-parser)
 //! - Send/receive files through a Portal relay
 //!
@@ -28,9 +28,9 @@
 //! // Both clients should derive the same key
 //! receiver.derive_key(&sender_msg).unwrap();
 //! sender.derive_key(&receiver_msg).unwrap();
-//! 
+//!
 //! ```
-//! You can use the `Portal::confirm_peer()` method to verify that a remote peer has derived the same key 
+//! You can use the `Portal::confirm_peer()` method to verify that a remote peer has derived the same key
 //! as you, as long as the communication stream implements the std::io::Read and std::io::Write traits.
 //!
 //! Example of Sending a file:
@@ -46,12 +46,12 @@
 //! let id = "id".to_string();
 //! let pass ="test".to_string();
 //! let (mut portal,msg) = Portal::init(Direction::Sender,id,pass,None);
-//! 
+//!
 //! // complete key derivation + peer verification
-//! 
+//!
 //! let mut file = portal.load_file("/tmp/test").unwrap();
 //!
-//! // Encrypt the file and share state 
+//! // Encrypt the file and share state
 //! file.encrypt().unwrap();
 //! file.sync_file_state(&mut client).unwrap();
 //!
@@ -77,10 +77,10 @@
 //! // serialize & send request
 //! let request = portal.serialize().unwrap();
 //! client.write_all(&request).unwrap();
-//! 
+//!
 //! // get response
 //! let response = Portal::read_response_from(&client).unwrap();
-//! 
+//!
 //! // complete key derivation + peer verification
 //!
 //! // create outfile
@@ -98,26 +98,24 @@
 //! file.decrypt().unwrap();
 //! ```
 
-
 use anyhow::Result;
-use serde::{Serialize, Deserialize};
-use std::fs::File;
 use memmap::MmapOptions;
+use serde::{Deserialize, Serialize};
+use std::fs::File;
 use std::fs::OpenOptions;
 
 // Key Exchange
-use spake2::{Ed25519Group, Identity, Password, SPAKE2};
-use sha2::{Sha256, Digest};
 use hkdf::Hkdf;
+use sha2::{Digest, Sha256};
+use spake2::{Ed25519Group, Identity, Password, SPAKE2};
 
 // File encryption
-use chacha20poly1305::{ChaCha20Poly1305, Key}; 
-use chacha20poly1305::aead::{NewAead};
+use chacha20poly1305::aead::NewAead;
+use chacha20poly1305::{ChaCha20Poly1305, Key};
 
+mod chunks;
 pub mod errors;
 pub mod file;
-mod chunks;
-
 
 use errors::PortalError;
 use file::PortalFile;
@@ -133,11 +131,10 @@ pub const DEFAULT_PORT: u16 = 13265;
 pub const CHUNK_SIZE: usize = 65535;
 
 /**
- * A data format exchanged by each peer to derive 
+ * A data format exchanged by each peer to derive
  * the shared session key
  */
-pub type PortalConfirmation = [u8;33];
-
+pub type PortalConfirmation = [u8; 33];
 
 /**
  * The primary interface into the library. The Portal struct
@@ -145,8 +142,7 @@ pub type PortalConfirmation = [u8;33];
  * from a peer.
  */
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct Portal{
-
+pub struct Portal {
     // Information to correlate
     // connections on the relay
     id: String,
@@ -166,9 +162,8 @@ pub struct Portal{
     key: Option<Vec<u8>>,
 }
 
-
 /**
- * An enum to describe the direction of each file transfer 
+ * An enum to describe the direction of each file transfer
  * participant (i.e Sender/Receiver)
  */
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -185,7 +180,7 @@ fn compare_key_derivations(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
     for (ai, bi) in a.iter().zip(b.iter()) {
         match ai.cmp(&bi) {
             std::cmp::Ordering::Equal => continue,
-            ord => return ord
+            ord => return ord,
         }
     }
 
@@ -194,7 +189,6 @@ fn compare_key_derivations(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
 }
 
 impl Portal {
-    
     /**
      * Initialize a new portal request
      *
@@ -202,20 +196,20 @@ impl Portal {
      *
      * ```
      * use portal_lib::{Portal,Direction};
-     * 
+     *
      * // the shared password should be secret and hard to guess/crack
      * // see the portal-client as an example of potential usage
      * let id = "my client ID".to_string();
-     * let password = "testpasswd".to_string(); 
+     * let password = "testpasswd".to_string();
      * let portal = Portal::init(Direction::Sender,id,password,None);
      * ```
      */
-    pub fn init(direction: Direction, 
-                id: String,
-                password: String,
-                mut filename: Option<String>) -> (Portal,Vec<u8>) {
-
-        
+    pub fn init(
+        direction: Direction,
+        id: String,
+        password: String,
+        mut filename: Option<String>,
+    ) -> (Portal, Vec<u8>) {
         // hash the ID string
         let mut hasher = Sha256::new();
         hasher.update(&id);
@@ -223,9 +217,10 @@ impl Portal {
         let id_hash = hex::encode(&id_bytes);
 
         let (s1, outbound_msg) = SPAKE2::<Ed25519Group>::start_symmetric(
-           &Password::new(&password.as_bytes()),
-           &Identity::new(&id_bytes));
-       
+            &Password::new(&password.as_bytes()),
+            &Identity::new(&id_bytes),
+        );
+
         // if a file was provided, trim it to just the file name
         if let Some(file) = filename {
             let f = std::path::Path::new(&file);
@@ -233,18 +228,21 @@ impl Portal {
             filename = Some(f.to_string());
         }
 
-        (Portal {
-            direction,
-            id: id_hash,
-            filename,
-            filesize: 0,
-            state: Some(s1),
-            key: None,
-        }, outbound_msg)
+        (
+            Portal {
+                direction,
+                id: id_hash,
+                filename,
+                filesize: 0,
+                state: Some(s1),
+                key: None,
+            },
+            outbound_msg,
+        )
     }
 
     /**
-     * Initialize with existing data, attempting to deserialize bytes 
+     * Initialize with existing data, attempting to deserialize bytes
      * into a Portal struct
      *
      * # Example
@@ -252,7 +250,7 @@ impl Portal {
      * ```
      * use portal_lib::Portal;
      * use std::io::Read;
-     * fn example(mut client: std::net::TcpStream) { 
+     * fn example(mut client: std::net::TcpStream) {
      *     let mut buf = [0; 1024];
      *     let len = client.read(&mut buf);
      *     let response = match Portal::parse(&buf) {
@@ -270,14 +268,14 @@ impl Portal {
     }
 
     /**
-     * Initialize by reading from a stream that implements the 
+     * Initialize by reading from a stream that implements the
      * std::io::Read trait, consuming the bytes
      *
      * # Example
      *
      * ```
      * use portal_lib::Portal;
-     * fn example(client: std::net::TcpStream) { 
+     * fn example(client: std::net::TcpStream) {
      *     let response = match Portal::read_response_from(&client) {
      *          Ok(r) => r,
      *          Err(_) => {
@@ -288,20 +286,22 @@ impl Portal {
      * }
      * ```
      */
-    pub fn read_response_from<R>(reader: R) -> Result<Portal> 
+    pub fn read_response_from<R>(reader: R) -> Result<Portal>
     where
-        R: std::io::Read {
-        Ok(bincode::deserialize_from::<R,Portal>(reader)?)
+        R: std::io::Read,
+    {
+        Ok(bincode::deserialize_from::<R, Portal>(reader)?)
     }
 
     /**
      * Receive the bytes necessary for a confirmation message
      * from a stream that implements std::io::Read, consuming the bytes
      */
-    pub fn read_confirmation_from<R>(mut reader: R) -> Result<PortalConfirmation> 
+    pub fn read_confirmation_from<R>(mut reader: R) -> Result<PortalConfirmation>
     where
-       R: std::io::Read {
-        let mut res: PortalConfirmation= [0u8;33];
+        R: std::io::Read,
+    {
+        let mut res: PortalConfirmation = [0u8; 33];
         reader.read_exact(&mut res)?;
         Ok(res)
     }
@@ -313,10 +313,10 @@ impl Portal {
         Ok(bincode::serialize(&self)?)
     }
 
-     /*
+    /*
      * mmap's a file into memory for reading
      */
-    pub fn load_file<'a>(&'a self, f: &str) -> Result<PortalFile>  {
+    pub fn load_file<'a>(&'a self, f: &str) -> Result<PortalFile> {
         let file = File::open(f)?;
         let mmap = unsafe { MmapOptions::new().map_copy(&file)? };
 
@@ -325,45 +325,38 @@ impl Portal {
 
         let cipher = ChaCha20Poly1305::new(cha_key);
 
-        Ok(PortalFile::init(mmap,cipher))
+        Ok(PortalFile::init(mmap, cipher))
     }
-
 
     /*
      * mmap's a file into memory for writing
      */
-    pub fn create_file<'a>(&'a self, f: &str, size: u64) -> Result<PortalFile>  {
-
+    pub fn create_file<'a>(&'a self, f: &str, size: u64) -> Result<PortalFile> {
         let file = OpenOptions::new()
-                       .read(true)
-                       .write(true)
-                       .create(true)
-                       .open(&f)?;
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&f)?;
 
         file.set_len(size)?;
 
         let key = self.key.as_ref().ok_or_else(|| PortalError::NoPeer)?;
 
-
-        let mmap = unsafe {
-            MmapOptions::new().map_mut(&file)?
-        };
+        let mmap = unsafe { MmapOptions::new().map_mut(&file)? };
 
         let cha_key = Key::from_slice(&key[..]);
 
         let cipher = ChaCha20Poly1305::new(cha_key);
 
-        Ok(PortalFile::init(mmap,cipher))
+        Ok(PortalFile::init(mmap, cipher))
     }
 
-   
     /**
      * Derive a shared key with the exchanged data
      * at this point in the exchange we have not verified that our peer
      * has derived the same key as us
      */
     pub fn derive_key(&mut self, msg_data: &[u8]) -> Result<()> {
-
         // after calling finish() the SPAKE2 struct will be consumed
         // so we must replace the value stored in self.state
         let state = std::mem::replace(&mut self.state, None);
@@ -372,41 +365,44 @@ impl Portal {
 
         self.key = match state.finish(msg_data) {
             Ok(res) => Some(res),
-            Err(_) => {return Err(PortalError::BadMsg.into());}
+            Err(_) => {
+                return Err(PortalError::BadMsg.into());
+            }
         };
 
         Ok(())
     }
-
-    
 
     /**
      * Confirm that the peer has derived the same key
      */
     pub fn confirm_peer<R>(&mut self, mut client: R) -> Result<()>
     where
-       R: std::io::Read + std::io::Write {
-
+        R: std::io::Read + std::io::Write,
+    {
         let key = self.key.as_ref().ok_or_else(|| PortalError::NoPeer)?;
 
-        let sender_info = format!("{}-{}",self.id,"senderinfo");
-        let receiver_info = format!("{}-{}",self.id,"receiverinfo");
+        let sender_info = format!("{}-{}", self.id, "senderinfo");
+        let receiver_info = format!("{}-{}", self.id, "receiverinfo");
 
         // Perform key confirmation step
-        let h = Hkdf::<Sha256>::new(None,&key);
-        let mut peer_msg = [0u8;42];
+        let h = Hkdf::<Sha256>::new(None, &key);
+        let mut peer_msg = [0u8; 42];
         let mut sender_confirm = [0u8; 42];
         let mut receiver_confirm = [0u8; 42];
-        h.expand(&sender_info.as_bytes(), &mut sender_confirm).unwrap();
-        h.expand(&receiver_info.as_bytes(), &mut receiver_confirm).unwrap();
-
+        h.expand(&sender_info.as_bytes(), &mut sender_confirm)
+            .unwrap();
+        h.expand(&receiver_info.as_bytes(), &mut receiver_confirm)
+            .unwrap();
 
         match self.direction {
             Direction::Sender => {
                 client.write_all(&sender_confirm)?;
                 client.read_exact(&mut peer_msg)?;
 
-                if compare_key_derivations(&peer_msg,&receiver_confirm) == std::cmp::Ordering::Equal {
+                if compare_key_derivations(&peer_msg, &receiver_confirm)
+                    == std::cmp::Ordering::Equal
+                {
                     return Ok(());
                 }
 
@@ -416,14 +412,14 @@ impl Portal {
                 client.write_all(&receiver_confirm)?;
                 client.read_exact(&mut peer_msg)?;
 
-                if compare_key_derivations(&peer_msg,&sender_confirm) == std::cmp::Ordering::Equal {
+                if compare_key_derivations(&peer_msg, &sender_confirm) == std::cmp::Ordering::Equal
+                {
                     return Ok(());
                 }
 
                 Err(PortalError::BadMsg.into())
             }
         }
-
     }
 
     /**
@@ -438,7 +434,7 @@ impl Portal {
      */
     pub fn set_file_size(&mut self, size: u64) {
         self.filesize = size;
-    } 
+    }
 
     /**
      * Returns the file name associated with this request
@@ -452,7 +448,7 @@ impl Portal {
     }
 
     /**
-     * Returns a copy of the Portal::Direction associated with 
+     * Returns a copy of the Portal::Direction associated with
      * this Portal request
      */
     pub fn get_direction(&self) -> Direction {
@@ -465,7 +461,6 @@ impl Portal {
     pub fn set_direction(&mut self, direction: Direction) {
         self.direction = direction;
     }
-
 
     /**
      * Returns a reference to the ID associated with this
@@ -485,35 +480,32 @@ impl Portal {
 
 #[cfg(test)]
 mod tests {
-    use super::{Portal,Direction};
-    use sha2::Sha256;
-    use hkdf::Hkdf;
-    use std::io::Write;
+    use super::{Direction, Portal};
     use crate::file::tests::MockTcpStream;
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+    use std::io::Write;
 
     #[test]
     fn key_derivation() {
-
         // receiver
         let dir = Direction::Receiver;
-        let pass ="test".to_string();
-        let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let pass = "test".to_string();
+        let (mut receiver, receiver_msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // sender
         let dir = Direction::Sender;
-        let pass ="test".to_string();
-        let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let pass = "test".to_string();
+        let (mut sender, sender_msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         receiver.derive_key(sender_msg.as_slice()).unwrap();
         sender.derive_key(receiver_msg.as_slice()).unwrap();
 
-        assert_eq!(receiver.key,sender.key);
+        assert_eq!(receiver.key, sender.key);
     }
-
 
     #[test]
     fn key_confirmation() {
-
         let mut receiver_side = MockTcpStream {
             data: Vec::with_capacity(crate::CHUNK_SIZE),
         };
@@ -524,30 +516,32 @@ mod tests {
 
         // receiver
         let dir = Direction::Receiver;
-        let pass ="test".to_string();
-        let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let pass = "test".to_string();
+        let (mut receiver, receiver_msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // sender
         let dir = Direction::Sender;
-        let pass ="test".to_string();
-        let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let pass = "test".to_string();
+        let (mut sender, sender_msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         receiver.derive_key(sender_msg.as_slice()).unwrap();
         sender.derive_key(receiver_msg.as_slice()).unwrap();
 
         // identifiers known to each party
         let id = receiver.get_id();
-        let sender_info = format!("{}-{}",id,"senderinfo");
-        let receiver_info = format!("{}-{}",id,"receiverinfo");
+        let sender_info = format!("{}-{}", id, "senderinfo");
+        let receiver_info = format!("{}-{}", id, "receiverinfo");
 
         // Perform the HKDF operations
-        let h = Hkdf::<Sha256>::new(None,&sender.key.as_ref().unwrap());
+        let h = Hkdf::<Sha256>::new(None, &sender.key.as_ref().unwrap());
         let mut sender_confirm = [0u8; 42];
         let mut receiver_confirm = [0u8; 42];
-        h.expand(&sender_info.as_bytes(), &mut sender_confirm).unwrap();
-        h.expand(&receiver_info.as_bytes(), &mut receiver_confirm).unwrap();
+        h.expand(&sender_info.as_bytes(), &mut sender_confirm)
+            .unwrap();
+        h.expand(&receiver_info.as_bytes(), &mut receiver_confirm)
+            .unwrap();
 
-        // pre-send the appropriate HKDF to each stream, simulating a peer 
+        // pre-send the appropriate HKDF to each stream, simulating a peer
         receiver_side.write(&sender_confirm).unwrap();
         sender_side.write(&receiver_confirm).unwrap();
 
@@ -559,13 +553,13 @@ mod tests {
     #[test]
     fn portal_load_file() {
         let dir = Direction::Receiver;
-        let pass ="test".to_string();
-        let (_receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let pass = "test".to_string();
+        let (_receiver, receiver_msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // sender
         let dir = Direction::Sender;
-        let pass ="test".to_string();
-        let (mut sender,_sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let pass = "test".to_string();
+        let (mut sender, _sender_msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // Confirm
         sender.derive_key(receiver_msg.as_slice()).unwrap();
@@ -576,16 +570,15 @@ mod tests {
 
     #[test]
     fn portalfile_chunks_iterator() {
-        
         // receiver
         let dir = Direction::Receiver;
-        let pass ="test".to_string();
-        let (_receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let pass = "test".to_string();
+        let (_receiver, receiver_msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // sender
         let dir = Direction::Sender;
-        let pass ="test".to_string();
-        let (mut sender,_sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let pass = "test".to_string();
+        let (mut sender, _sender_msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // Confirm
         sender.derive_key(receiver_msg.as_slice()).unwrap();
@@ -598,45 +591,43 @@ mod tests {
             assert!(v.len() <= chunk_size);
         }
 
-
         let chunk_size = 1024;
         for v in file.get_chunks(chunk_size) {
             assert!(v.len() <= chunk_size);
         }
-
     }
 
     #[test]
     fn portal_createfile() {
         // receiver
         let dir = Direction::Receiver;
-        let pass ="test".to_string();
-        let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let pass = "test".to_string();
+        let (mut receiver, receiver_msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // sender
         let dir = Direction::Sender;
-        let pass ="test".to_string();
-        let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let pass = "test".to_string();
+        let (mut sender, sender_msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // Confirm
         sender.derive_key(receiver_msg.as_slice()).unwrap();
         receiver.derive_key(sender_msg.as_slice()).unwrap();
 
         // TODO change test file
-        let _file_dst = receiver.create_file("/tmp/passwd",4096).unwrap();
+        let _file_dst = receiver.create_file("/tmp/passwd", 4096).unwrap();
     }
 
     #[test]
     fn portal_write_chunk() {
         // receiver
         let dir = Direction::Receiver;
-        let pass ="test".to_string();
-        let (mut receiver,receiver_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let pass = "test".to_string();
+        let (mut receiver, receiver_msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // sender
         let dir = Direction::Sender;
-        let pass ="test".to_string();
-        let (mut sender,sender_msg) = Portal::init(dir,"id".to_string(),pass,None);
+        let pass = "test".to_string();
+        let (mut sender, sender_msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // Confirm
         sender.derive_key(receiver_msg.as_slice()).unwrap();
@@ -644,16 +635,15 @@ mod tests {
 
         // TODO change test file
         let file_src = sender.load_file("/etc/passwd").unwrap();
-        let mut file_dst = receiver.create_file("/tmp/passwd",4096).unwrap();
+        let mut file_dst = receiver.create_file("/tmp/passwd", 4096).unwrap();
 
         let chunk_size = 4096;
         for v in file_src.get_chunks(chunk_size) {
-
             assert!(v.len() <= chunk_size);
 
             // test writing chunk
             file_dst.write_given_chunk(&v).unwrap();
-        } 
+        }
     }
 
     #[test]
@@ -661,10 +651,10 @@ mod tests {
     fn portal_createfile_no_peer() {
         let dir = Direction::Sender;
         let pass = "test".to_string();
-        let (portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
+        let (portal, _msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // will panic due to lack of peer
-        let _file_dst = portal.create_file("/tmp/passwd",4096).unwrap();
+        let _file_dst = portal.create_file("/tmp/passwd", 4096).unwrap();
     }
 
     #[test]
@@ -672,7 +662,7 @@ mod tests {
     fn portal_loadfile_no_peer() {
         let dir = Direction::Sender;
         let pass = "test".to_string();
-        let (portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
+        let (portal, _msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // will panic due to lack of peer
         let _file_src = portal.load_file("/etc/passwd").unwrap();
@@ -680,12 +670,11 @@ mod tests {
 
     #[test]
     fn test_file_trim() {
-
         let file = Some("/my/path/filename.txt".to_string());
 
         let dir = Direction::Receiver;
-        let pass ="test".to_string();
-        let (receiver,_receiver_msg) = Portal::init(dir,"id".to_string(),pass,file);
+        let pass = "test".to_string();
+        let (receiver, _receiver_msg) = Portal::init(dir, "id".to_string(), pass, file);
 
         let result = receiver.get_file_name().unwrap();
 
@@ -694,39 +683,38 @@ mod tests {
 
     #[test]
     fn test_compressed_edwards_size() {
-
         // The exchanged message is the CompressedEdwardsY + 1 byte for the SPAKE direction
         let edwards_point = <spake2::Ed25519Group as spake2::Group>::Element::default();
         let compressed = edwards_point.compress();
-        let msg_size: usize = std::mem::size_of_val(&compressed)+1;
+        let msg_size: usize = std::mem::size_of_val(&compressed) + 1;
 
-        assert_eq!(33,msg_size);
+        assert_eq!(33, msg_size);
     }
 
     #[test]
     fn test_getters_setters() {
         let dir = Direction::Sender;
         let pass = "test".to_string();
-        let (mut portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
+        let (mut portal, _msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         // get/set ID
         portal.set_id("newID".to_string());
-        assert_eq!("newID",portal.get_id());
+        assert_eq!("newID", portal.get_id());
 
         // get/set direction
         portal.set_direction(Direction::Receiver);
-        assert_eq!(portal.get_direction(),Direction::Receiver);
+        assert_eq!(portal.get_direction(), Direction::Receiver);
 
         // get/set direction
         portal.set_file_size(25);
-        assert_eq!(portal.get_file_size(),25);
+        assert_eq!(portal.get_file_size(), 25);
     }
 
     #[test]
     fn test_serialize_deserialize() {
         let dir = Direction::Sender;
         let pass = "test".to_string();
-        let (portal,_msg) = Portal::init(dir,"id".to_string(),pass, None);
+        let (portal, _msg) = Portal::init(dir, "id".to_string(), pass, None);
 
         let ser = portal.serialize().unwrap();
         let res = Portal::parse(&ser).unwrap();
@@ -742,5 +730,4 @@ mod tests {
         assert_eq!(res.state, None);
         assert_eq!(res.key, None);
     }
-
 }

@@ -168,7 +168,7 @@ fn transfer(
             println!("{}", "Ok!".green());
 
             // iterate over the file in chunks, attempting to send
-            // each one 
+            // each one
             for data in file.get_chunks(portal::CHUNK_SIZE) {
                 match client.write_all(&data) {
                     Ok(_) => {}
