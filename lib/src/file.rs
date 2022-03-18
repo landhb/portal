@@ -33,10 +33,10 @@ pub struct PortalFile {
  * data that must be transferred to the peer for
  * decryption
  */
-#[derive(Serialize, Deserialize, PartialEq)]
-struct StateMetadata {
-    nonce: Vec<u8>,
-    tag: Vec<u8>,
+#[derive(Serialize, Deserialize, PartialEq, Default)]
+pub struct StateMetadata {
+    pub nonce: Vec<u8>,
+    pub tag: Vec<u8>,
 }
 
 impl PortalFile {
@@ -84,7 +84,7 @@ impl PortalFile {
             .decrypt_in_place_detached(nonce, b"", &mut self.mmap[..], &tag)
         {
             Ok(_) => Ok(()),
-            Err(_e) => Err(PortalError::EncryptError.into()),
+            Err(_e) => Err(PortalError::DecryptError.into()),
         }
     }
 
