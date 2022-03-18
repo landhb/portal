@@ -1,5 +1,6 @@
 extern crate portal_lib as portal;
 
+use env_logger::Env;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::channel::channel;
@@ -13,14 +14,16 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 use threadpool::ThreadPool;
 
+use log;
+
 #[macro_use]
 extern crate lazy_static;
 
 mod handlers;
 mod networking;
 
-#[macro_use]
-mod logging;
+extern crate env_logger;
+
 mod protocol;
 
 use protocol::register;
@@ -91,6 +94,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(not(debug_assertions))]
     daemonize()?;
 
+    // Initialize logging
+    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
+        .default_format()
+        .format_target(false)
+        .init();
+
+    log::info!("Starting portal relay");
+
     // Create a poll instance.
     let poll = Poll::new()?;
 
@@ -100,6 +111,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Setup the server socket.
     let addr = format!("0.0.0.0:{}", portal::DEFAULT_PORT).parse()?;
     let server = TcpListener::bind(&addr)?;
+
+    log::info!("Listening on {}", addr);
 
     // Start listening for incoming connections.
     poll.register(&server, SERVER, Ready::readable(), PollOpt::edge())?;
@@ -144,14 +157,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     };
 
-                    log!("[+] Got connection from {:?}", _addr);
+                    log::info!("[+] New connection from {:?}", _addr);
 
                     // TODO set RECV_TIMEO
                     let tx_new = tx.clone();
                     thread_pool.execute(move || match register(connection, tx_new) {
                         Ok(_) => {}
                         Err(_e) => {
-                            log!("{}", _e);
+                            log::error!("Error creating portal: {}", _e);
                         }
                     });
                 },
@@ -205,10 +218,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         None => {
                             continue;
                         }
-                    };
+                    }
+                    .clone();
 
                     // get the EndpointPair that generated the event
-                    let pair = match ref_endpoints.get_mut(id) {
+                    let pair = match ref_endpoints.get_mut(&id) {
                         Some(p) => p,
                         None => {
                             continue;
@@ -230,7 +244,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     };
 
-                    log!("event {:?}, side: {:?}", event, side);
+                    log::debug!("[{:.6}] {:?} Event: {:?}", id, side, event);
 
                     let mut done = false;
 
@@ -255,13 +269,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
 
-                    log!("handler finished {:?}", done);
+                    log::debug!("[{:.6}] Handler finished. Done: {:?}", id, done);
 
                     // If this connection is finished, or our peer has disconnected
                     // shutdown the connection
                     if done {
-                        log!("Removing {:?}", endpoint);
-
                         // There may still be some data in the Receiver's pipe, drain it
                         // before closing the peer connection. We must register for writeable
                         // events in case the Receiver's socket is still blocking
@@ -274,10 +286,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                             ) {
                                 Ok(_) => {}
                                 Err(e) => {
-                                    println!("{:?}", e);
+                                    log::error!("[{:.6}] Error: {:?}", id, e);
                                 }
                             }
                         }
+
+                        log::info!(
+                            "[{:.6}] Removing {:?} connection",
+                            endpoint.id,
+                            endpoint.dir
+                        );
 
                         // Shutdown this endpoint
                         poll.deregister(&endpoint.stream)?;
