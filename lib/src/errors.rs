@@ -19,6 +19,8 @@ pub enum PortalError {
     EncryptError,
     #[error("EncryptError")]
     DecryptError,
+    #[error("IOError")]
+    IOError,
     #[error("Interrupted")]
     Interrupted,
     #[error("WouldBlock")]

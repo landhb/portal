@@ -331,7 +331,7 @@ impl Portal {
         use chacha20poly1305::{aead::AeadInPlace, Nonce, Tag};
 
         // Obtain the cipher from the key
-        let key = self.key.as_ref().ok_or_else(|| PortalError::NoPeer)?;
+        let key = self.key.as_ref().ok_or(PortalError::NoPeer)?;
         let cha_key = Key::from_slice(&key[..]);
         let cipher = ChaCha20Poly1305::new(cha_key);
 
@@ -377,7 +377,7 @@ impl Portal {
         state.nonce.extend(nonce);
 
         // Obtain the cipher from the key
-        let key = self.key.as_ref().ok_or_else(|| PortalError::NoPeer)?;
+        let key = self.key.as_ref().ok_or(PortalError::NoPeer)?;
         let cha_key = Key::from_slice(&key[..]);
         let cipher = ChaCha20Poly1305::new(cha_key);
 
@@ -395,8 +395,10 @@ impl Portal {
         let data = bincode::serialize(&data)?;
 
         // Send the encrypted state & metadata
-        writer.write_all(&bincode::serialize(&state)?)?;
-        writer.write_all(&data)?;
+        writer
+            .write_all(&bincode::serialize(&state)?)
+            .or(Err(PortalError::IOError))?;
+        writer.write_all(&data).or(Err(PortalError::IOError))?;
         Ok(data.len())
     }
 
@@ -414,7 +416,7 @@ impl Portal {
         let file = File::open(f)?;
         let mmap = unsafe { MmapOptions::new().map_copy(&file)? };
 
-        let key = self.key.as_ref().ok_or_else(|| PortalError::NoPeer)?;
+        let key = self.key.as_ref().ok_or(PortalError::NoPeer)?;
         let cha_key = Key::from_slice(&key[..]);
 
         let cipher = ChaCha20Poly1305::new(cha_key);
@@ -434,7 +436,7 @@ impl Portal {
 
         file.set_len(size)?;
 
-        let key = self.key.as_ref().ok_or_else(|| PortalError::NoPeer)?;
+        let key = self.key.as_ref().ok_or(PortalError::NoPeer)?;
 
         let mmap = unsafe { MmapOptions::new().map_mut(&file)? };
 
@@ -454,7 +456,7 @@ impl Portal {
         // so we must replace the value stored in self.state
         let state = std::mem::replace(&mut self.state, None);
 
-        let state = state.ok_or_else(|| PortalError::BadState)?;
+        let state = state.ok_or(PortalError::BadState)?;
 
         self.key = match state.finish(msg_data) {
             Ok(res) => Some(res),
@@ -473,7 +475,7 @@ impl Portal {
     where
         R: std::io::Read + std::io::Write,
     {
-        let key = self.key.as_ref().ok_or_else(|| PortalError::NoPeer)?;
+        let key = self.key.as_ref().ok_or(PortalError::NoPeer)?;
 
         let sender_info = format!("{}-{}", self.id, "senderinfo");
         let receiver_info = format!("{}-{}", self.id, "receiverinfo");
