@@ -17,7 +17,7 @@ pub enum PortalError {
     BadMsg,
     #[error("EncryptError")]
     EncryptError,
-    #[error("EncryptError")]
+    #[error("DecryptError")]
     DecryptError,
     #[error("IOError")]
     IOError,

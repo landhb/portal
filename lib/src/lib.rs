@@ -111,13 +111,16 @@ use spake2::{Ed25519Group, Identity, Password, SPAKE2};
 
 // File encryption
 use chacha20poly1305::aead::NewAead;
-use chacha20poly1305::{ChaCha20Poly1305, Key};
+use chacha20poly1305::{aead::AeadInPlace, ChaCha20Poly1305, Key, Nonce, Tag};
+
+// Nonce generation
+use rand::Rng;
 
 mod chunks;
 pub mod errors;
 pub mod file;
 
-use errors::PortalError;
+use errors::PortalError::*;
 use file::{PortalFile, StateMetadata};
 
 /**
@@ -328,25 +331,30 @@ impl Portal {
     where
         R: std::io::Read,
     {
-        use chacha20poly1305::{aead::AeadInPlace, Nonce, Tag};
-
         // Obtain the cipher from the key
-        let key = self.key.as_ref().ok_or(PortalError::NoPeer)?;
+        let key = self.key.as_ref().ok_or(NoPeer)?;
         let cha_key = Key::from_slice(&key[..]);
         let cipher = ChaCha20Poly1305::new(cha_key);
 
         // Receive the encryption state
-        let state: StateMetadata = bincode::deserialize_from(&mut reader)?;
+        let state: StateMetadata = bincode::deserialize_from(&mut reader).or(Err(BadMsg))?;
 
         // Receive the data
-        let mut data: Vec<u8> = bincode::deserialize_from(&mut reader)?;
+        let mut data: Vec<u8> = bincode::deserialize_from(&mut reader).or(Err(BadMsg))?;
+
+        // Verify nonce & tag lengths
+        if state.nonce.len() != std::mem::size_of::<Nonce>()
+            || state.tag.len() != std::mem::size_of::<Tag>()
+        {
+            return Err(BadState.into());
+        }
 
         // Decrypt the data
         let nonce = Nonce::from_slice(&state.nonce);
         let tag = Tag::from_slice(&state.tag);
         match cipher.decrypt_in_place_detached(&nonce, b"", &mut data, &tag) {
             Ok(_) => {}
-            Err(_e) => return Err(PortalError::DecryptError.into()),
+            Err(_e) => return Err(DecryptError.into()),
         }
 
         // Validate the metadata
@@ -364,9 +372,6 @@ impl Portal {
     where
         W: std::io::Write,
     {
-        use chacha20poly1305::{aead::AeadInPlace, Nonce};
-        use rand::Rng;
-
         // Init state to send
         let mut state = StateMetadata::default();
 
@@ -377,7 +382,7 @@ impl Portal {
         state.nonce.extend(nonce);
 
         // Obtain the cipher from the key
-        let key = self.key.as_ref().ok_or(PortalError::NoPeer)?;
+        let key = self.key.as_ref().ok_or(NoPeer)?;
         let cha_key = Key::from_slice(&key[..]);
         let cipher = ChaCha20Poly1305::new(cha_key);
 
@@ -387,18 +392,16 @@ impl Portal {
         // Encrypt the metadata in-place
         let tag = match cipher.encrypt_in_place_detached(nonce, b"", &mut data) {
             Ok(tag) => tag,
-            Err(_e) => return Err(PortalError::EncryptError.into()),
+            Err(_e) => return Err(EncryptError.into()),
         };
         state.tag.extend(tag);
 
         // Wrap the encrypted buffer so that it may be deserialized
-        let data = bincode::serialize(&data)?;
+        let mut finaldata = bincode::serialize(&state)?;
+        finaldata.extend_from_slice(&bincode::serialize(&data)?);
 
         // Send the encrypted state & metadata
-        writer
-            .write_all(&bincode::serialize(&state)?)
-            .or(Err(PortalError::IOError))?;
-        writer.write_all(&data).or(Err(PortalError::IOError))?;
+        writer.write_all(&finaldata).or(Err(IOError))?;
         Ok(data.len())
     }
 
@@ -416,7 +419,7 @@ impl Portal {
         let file = File::open(f)?;
         let mmap = unsafe { MmapOptions::new().map_copy(&file)? };
 
-        let key = self.key.as_ref().ok_or(PortalError::NoPeer)?;
+        let key = self.key.as_ref().ok_or(NoPeer)?;
         let cha_key = Key::from_slice(&key[..]);
 
         let cipher = ChaCha20Poly1305::new(cha_key);
@@ -436,7 +439,7 @@ impl Portal {
 
         file.set_len(size)?;
 
-        let key = self.key.as_ref().ok_or(PortalError::NoPeer)?;
+        let key = self.key.as_ref().ok_or(NoPeer)?;
 
         let mmap = unsafe { MmapOptions::new().map_mut(&file)? };
 
@@ -456,12 +459,12 @@ impl Portal {
         // so we must replace the value stored in self.state
         let state = std::mem::replace(&mut self.state, None);
 
-        let state = state.ok_or(PortalError::BadState)?;
+        let state = state.ok_or(BadState)?;
 
         self.key = match state.finish(msg_data) {
             Ok(res) => Some(res),
             Err(_) => {
-                return Err(PortalError::BadMsg.into());
+                return Err(BadMsg.into());
             }
         };
 
@@ -475,7 +478,7 @@ impl Portal {
     where
         R: std::io::Read + std::io::Write,
     {
-        let key = self.key.as_ref().ok_or(PortalError::NoPeer)?;
+        let key = self.key.as_ref().ok_or(NoPeer)?;
 
         let sender_info = format!("{}-{}", self.id, "senderinfo");
         let receiver_info = format!("{}-{}", self.id, "receiverinfo");
@@ -498,7 +501,7 @@ impl Portal {
                 if compare_key_derivations(&peer_msg, &receiver_confirm)
                     != std::cmp::Ordering::Equal
                 {
-                    return Err(PortalError::BadMsg.into());
+                    return Err(BadMsg.into());
                 }
             }
             Direction::Receiver => {
@@ -507,7 +510,7 @@ impl Portal {
 
                 if compare_key_derivations(&peer_msg, &sender_confirm) != std::cmp::Ordering::Equal
                 {
-                    return Err(PortalError::BadMsg.into());
+                    return Err(BadMsg.into());
                 }
             }
         }
@@ -535,7 +538,7 @@ impl Portal {
     pub fn get_file_name<'a>(&'a self) -> Result<&'a str> {
         match &self.metadata.filename {
             Some(f) => Ok(std::str::from_utf8(f)?),
-            None => Err(PortalError::NoneError.into()),
+            None => Err(NoneError.into()),
         }
     }
 
@@ -572,9 +575,10 @@ impl Portal {
 
 #[cfg(test)]
 mod tests {
-    use super::{Direction, Portal};
     use crate::file::tests::MockTcpStream;
+    use crate::{errors::PortalError, Direction, Portal, StateMetadata};
     use hkdf::Hkdf;
+    use rand::Rng;
     use sha2::Sha256;
     use std::io::Write;
 
@@ -618,6 +622,63 @@ mod tests {
             receiver.get_file_name().unwrap()
         );
         assert_eq!(sender.get_file_size(), receiver.get_file_size());
+    }
+
+    #[test]
+    fn fail_decrypt_metadata() {
+        let fsize = 1337;
+        let fname = "filename".to_string();
+
+        // receiver
+        let dir = Direction::Receiver;
+        let pass = "test".to_string();
+        let (mut receiver, receiver_msg) = Portal::init(dir, "id".to_string(), pass, None);
+
+        // sender
+        let dir = Direction::Sender;
+        let pass = "test".to_string();
+        let (mut sender, sender_msg) =
+            Portal::init(dir, "id".to_string(), pass, Some(fname.clone()));
+        sender.set_file_size(fsize);
+
+        // we need a key to be able to encrypt & decrypt
+        receiver.derive_key(sender_msg.as_slice()).unwrap();
+        sender.derive_key(receiver_msg.as_slice()).unwrap();
+
+        // Mock channel
+        let mut stream = MockTcpStream {
+            data: Vec::with_capacity(crate::CHUNK_SIZE),
+        };
+
+        // Send garbage state
+        let mut garbage = bincode::serialize(&StateMetadata::default()).unwrap();
+        garbage.extend_from_slice(&bincode::serialize(&vec![0u8]).unwrap());
+        stream.write_all(&garbage).unwrap();
+
+        // Verify error is BadState
+        let res = receiver.read_metadata_from(&mut stream);
+        assert!(res.is_err());
+        let _ = res.map_err(|e| match e.downcast_ref::<PortalError>() {
+            Some(PortalError::BadState) => anyhow::Ok(()),
+            _ => panic!("Unexpected error"),
+        });
+
+        // Send garbage metadata
+        let state = StateMetadata {
+            nonce: rand::thread_rng().gen::<[u8; 12]>().to_vec(),
+            tag: rand::thread_rng().gen::<[u8; 16]>().to_vec(),
+        };
+        let mut garbage = bincode::serialize(&state).unwrap();
+        garbage.extend_from_slice(&bincode::serialize(&vec![0u8]).unwrap());
+        stream.write_all(&garbage).unwrap();
+
+        // Verify error is DecryptError
+        let res = receiver.read_metadata_from(&mut stream);
+        assert!(res.is_err());
+        let _ = res.map_err(|e| match e.downcast_ref::<PortalError>() {
+            Some(PortalError::DecryptError) => anyhow::Ok(()),
+            _ => panic!("Unexpected error"),
+        });
     }
 
     #[test]

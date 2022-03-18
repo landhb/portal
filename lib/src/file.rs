@@ -77,6 +77,13 @@ impl PortalFile {
      * Decrypts the current PortalFile, by decrypting the mmap'd memory in-place
      */
     pub fn decrypt(&mut self) -> Result<()> {
+        // Verify nonce & tag lengths
+        if self.state.nonce.len() != std::mem::size_of::<Nonce>()
+            || self.state.tag.len() != std::mem::size_of::<Tag>()
+        {
+            return Err(PortalError::DecryptError.into());
+        }
+
         let nonce = Nonce::from_slice(&self.state.nonce);
         let tag = Tag::from_slice(&self.state.tag);
         match self
