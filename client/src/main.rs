@@ -73,10 +73,17 @@ fn transfer(
 
     /*
      * Step 2: Portal Response/Acknowledgement of peering
+     *
+     * TODO: This step isn't strictly necessary anymore since
+     * file metadata is exchanged later. Requires relay changes
+     * to fully remove.
+     *
+     * Could potentially be used to exchange networking information
+     * for a P2P implementation?
      */
     log_status!("Waiting for peer to connect...");
-    let resp = match Portal::read_response_from(&mut client) {
-        Ok(res) => res,
+    match Portal::read_response_from(&mut client) {
+        Ok(_) => {}
         Err(_e) => {
             log_error!("No peer found. Try again.");
             std::process::exit(0);
@@ -119,8 +126,11 @@ fn transfer(
 
     match is_reciever {
         true => {
-            let fname = format!("{}/{}", fpath, resp.get_file_name()?);
-            let fsize = resp.get_file_size();
+            // Receive metadata
+            portal.read_metadata_from(&mut client)?;
+
+            let fname = format!("{}/{}", fpath, portal.get_file_name()?);
+            let fsize = portal.get_file_size();
             log_status!("Downloading file: {:?}, size: {:?}", fname, fsize);
 
             let pb = ProgressBar::new(fsize);
@@ -157,6 +167,9 @@ fn transfer(
 
             let pb = ProgressBar::new(portal.get_file_size());
             pb.set_style(pstyle);
+
+            // Send metadata
+            portal.write_metadata_to(&mut client)?;
 
             // open file read-only for sending
             let mut file = portal.load_file(fpath)?;
