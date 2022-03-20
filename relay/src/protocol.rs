@@ -4,6 +4,7 @@ use os_pipe::pipe;
 use portal_lib::Portal;
 use std::error::Error;
 use std::io::Write;
+use std::net::SocketAddr;
 use std::os::unix::io::AsRawFd;
 use std::time::SystemTime;
 
@@ -16,6 +17,7 @@ const PLACEHOLDER: usize = 0;
  * with a peer. If matched, the pair will be added to an event loop
  */
 pub fn register(
+    addr: SocketAddr,
     mut connection: TcpStream,
     tx: mio_extras::channel::Sender<EndpointPair>,
 ) -> Result<(), Box<dyn Error>> {
@@ -23,7 +25,7 @@ pub fn register(
     while received_data.is_empty() {
         match networking::recv_generic(&mut connection, &mut received_data) {
             Ok(v) if v < 0 => {
-                break;  // done recieving
+                break; // done recieving
             }
             Ok(_) => {}
             Err(_) => {
@@ -32,18 +34,22 @@ pub fn register(
         }
     }
 
-    log!("{:?}", received_data.len());
+    log::trace!("[?] Received {:?} bytes", received_data.len());
 
     // attempt to recieve a portal request
     let req: Portal = match Portal::parse(&received_data) {
         Ok(r) => r,
         Err(e) => {
-            log!("{:?}", e);
+            log::debug!("Failed to parse portal request: {:?}", e);
             return Err(e.into());
         }
     };
 
-    log!("req: {:?}", req);
+    // Lookup existing endpoint with this ID
+    let id = req.get_id();
+    let dir = req.get_direction();
+
+    log::info!("[{:.6}] New Portal request: {:?}({:?})", id, dir, addr);
 
     // Clear old entries before accepting, will keep
     // connections < 15 min old
@@ -54,10 +60,7 @@ pub fn register(
                 < std::time::Duration::from_secs(60 * 15).as_secs())
     });
 
-    // Lookup existing endpoint with this ID
-    let id = req.get_id();
-
-    match req.get_direction() {
+    match dir {
         portal::Direction::Receiver => {
             //let mut ref_endpoints = endpoints.borrow_mut();
             let mut peer = match ref_endpoints.remove(&id.to_string()) {
@@ -67,22 +70,35 @@ pub fn register(
                 }
             };
 
+            log::info!("[{:.6}] Receiver matched with Sender", id);
+
             // if the peer already has a connection, disregard this one
             if peer.has_peer {
                 let _ = connection.shutdown(std::net::Shutdown::Both);
+                log::info!("[{:.6}] Canceled receiving connection: Sender already has a different connection.", id);
                 return Ok(());
             }
 
             // This pipe will be used to send data from Receiver->Sender
             // so the Sender will keep the read side, and the Receiver will
             // keep the write side
-            let (reader2, mut writer2) = pipe().unwrap();
+            let (reader2, mut writer2) = match pipe() {
+                Ok((r, w)) => (r, w),
+                Err(err) => {
+                    log::error!(
+                        "[{:.6}] Error creating pipe for peer communication. Reason: {}",
+                        id,
+                        err
+                    );
+                    return Err(Box::new(err));
+                }
+            };
 
             // write the acknowledgement response to both pipe endpoints
             let resp = req.serialize()?;
             writer2.write_all(&resp)?;
 
-            log!("Finished writing to pipes");
+            log::debug!("[{:.6}] Acknowledgement sent to peer", id);
 
             // update the peer with the pipe information
             let old_reader = std::mem::replace(&mut peer.peer_reader, Some(reader2));
@@ -91,7 +107,7 @@ pub fn register(
             // create this endpoint
             let endpoint = Endpoint {
                 id: id.to_string(),
-                dir: req.get_direction(),
+                dir,
                 stream: connection,
                 peer_reader: old_reader,
                 peer_writer: Some(writer2), //None,
@@ -99,7 +115,7 @@ pub fn register(
                 time_added: SystemTime::now(),
             };
 
-            log!("Added Receiver {:?}", endpoint);
+            log::debug!("[{:.6}] Added Receiver", id);
 
             let pair = EndpointPair {
                 sender: peer,
@@ -140,7 +156,7 @@ pub fn register(
 
             let endpoint = Endpoint {
                 id: id.to_string(),
-                dir: req.get_direction(),
+                dir,
                 stream: connection,
                 peer_writer: Some(writer),
                 peer_reader: Some(reader),
@@ -148,7 +164,7 @@ pub fn register(
                 time_added: SystemTime::now(),
             };
 
-            log!("Added Sender: {:?}", endpoint);
+            log::debug!("[{:.6}] Added Sender", id);
 
             ref_endpoints.entry(id.to_string()).or_insert(endpoint);
         }

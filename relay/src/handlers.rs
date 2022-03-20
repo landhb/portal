@@ -15,11 +15,16 @@ pub fn tcp_splice(endpoint: &Endpoint, peer: &Endpoint) -> Result<bool> {
     let mut rx;
     let mut tx;
 
+    // Pipe from tcp -> p_in
     let src_fd = endpoint.stream.as_raw_fd();
     let p_in = endpoint.peer_writer.as_ref().unwrap().as_raw_fd();
 
+    // Pipe from p_out -> tcp
     let p_out = peer.peer_reader.as_ref().unwrap().as_raw_fd();
     let dst_fd = peer.stream.as_raw_fd();
+
+    // Connection ID
+    let id = endpoint.id.clone();
 
     loop {
         unsafe {
@@ -35,17 +40,19 @@ pub fn tcp_splice(endpoint: &Endpoint, peer: &Endpoint) -> Result<bool> {
         }
 
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
-        log!(
-            "got {} bytes from {:?}, errno: {:?}",
-            rx,
-            endpoint.dir,
-            errno
-        );
 
         // check if connection is closed
         if rx < 0 && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
+            log::error!(
+                "[{:.6}] Error receiving data from {:?}: errno: {}",
+                id,
+                endpoint.dir,
+                errno
+            );
             return Ok(true);
         }
+
+        log::debug!("[{:.6}] Received {} bytes from {:?}", id, rx, endpoint.dir);
 
         /* We cannot break here on EWOULDBLOCK since the first splice may return EWOULDBLOCK
          * if the pipe is full, in that case we'd still want to complete the second splice
@@ -68,11 +75,16 @@ pub fn tcp_splice(endpoint: &Endpoint, peer: &Endpoint) -> Result<bool> {
         }
 
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap();
-        log!("sent {} bytes to {:?}, errno: {:?}", tx, peer.dir, errno);
 
         // check for errors
         if tx < 0 && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
-            println!("exiting due to trx: {:?} errno {:?}", tx, errno);
+            log::error!(
+                "[{:.6}] Exiting due to error splicing pipes from {:?}. trx: {:?} errno {:?}",
+                id,
+                endpoint.dir,
+                tx,
+                errno
+            );
             return Ok(true);
         }
 
@@ -84,6 +96,8 @@ pub fn tcp_splice(endpoint: &Endpoint, peer: &Endpoint) -> Result<bool> {
         if tx == 0 {
             return Ok(true);
         }
+
+        log::debug!("[{:.6}] Sent {} bytes to {:?}", id, tx, peer.dir);
     }
 
     Ok(false)
@@ -106,6 +120,8 @@ pub fn drain_pipe(endpoint: &Endpoint) -> Result<bool> {
 
     let mut trx;
 
+    let id = endpoint.id.clone();
+
     unsafe {
         let errno = libc::__errno_location();
         *errno = 0;
@@ -126,16 +142,15 @@ pub fn drain_pipe(endpoint: &Endpoint) -> Result<bool> {
 
         // check for errors
         if trx < 0 && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
-            println!("exiting due to trx: {:?} errno {:?}", trx, errno);
+            log::error!(
+                "[{:.6}] Exiting due to error draining pipe to {:?}. trx: {:?} errno {:?}",
+                id,
+                endpoint.dir,
+                trx,
+                errno
+            );
             return Ok(true);
         }
-
-        log!(
-            "drained {} bytes to {:?}, errno: {:?}",
-            trx,
-            endpoint.dir,
-            errno
-        );
 
         // break if blocking
         if trx < 0 && (errno == libc::EWOULDBLOCK || errno == libc::EAGAIN) {
@@ -145,6 +160,14 @@ pub fn drain_pipe(endpoint: &Endpoint) -> Result<bool> {
         if trx == 0 {
             return Ok(true);
         }
+
+        log::debug!(
+            "[{:.6}] Drained {} bytes to {:?}, errno: {:?}",
+            id,
+            trx,
+            endpoint.dir,
+            errno
+        );
     }
 
     Ok(false)
