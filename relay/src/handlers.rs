@@ -15,12 +15,15 @@ pub fn tcp_splice(endpoint: &Endpoint, peer: &Endpoint) -> Result<bool> {
     let mut rx;
     let mut tx;
 
+    // Pipe from tcp -> p_in
     let src_fd = endpoint.stream.as_raw_fd();
     let p_in = endpoint.peer_writer.as_ref().unwrap().as_raw_fd();
 
+    // Pipe from p_out -> tcp
     let p_out = peer.peer_reader.as_ref().unwrap().as_raw_fd();
     let dst_fd = peer.stream.as_raw_fd();
 
+    // Connection ID
     let id = endpoint.id.clone();
 
     loop {
