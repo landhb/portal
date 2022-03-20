@@ -146,7 +146,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 SERVER => loop {
                     // If this is an event for the server, it means a connection
                     // is ready to be accepted.
-                    let (connection, _addr) = match server.accept() {
+                    let (connection, addr) = match server.accept() {
                         Ok((s, addr)) => (s, addr),
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             // go back to polling for connections
@@ -157,11 +157,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     };
 
-                    log::info!("[+] New connection from {:?}", _addr);
+                    log::debug!("[+] New connection from {:?}", addr);
 
                     // TODO set RECV_TIMEO
                     let tx_new = tx.clone();
-                    thread_pool.execute(move || match register(connection, tx_new) {
+                    thread_pool.execute(move || match register(addr, connection, tx_new) {
                         Ok(_) => {}
                         Err(_e) => {
                             log::error!("Error creating portal: {}", _e);

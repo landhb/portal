@@ -4,6 +4,7 @@ use os_pipe::pipe;
 use portal_lib::Portal;
 use std::error::Error;
 use std::io::Write;
+use std::net::SocketAddr;
 use std::os::unix::io::AsRawFd;
 use std::time::SystemTime;
 
@@ -16,6 +17,7 @@ const PLACEHOLDER: usize = 0;
  * with a peer. If matched, the pair will be added to an event loop
  */
 pub fn register(
+    addr: SocketAddr,
     mut connection: TcpStream,
     tx: mio_extras::channel::Sender<EndpointPair>,
 ) -> Result<(), Box<dyn Error>> {
@@ -32,7 +34,7 @@ pub fn register(
         }
     }
 
-    log::debug!("[?] Received {:?} bytes", received_data.len());
+    log::trace!("[?] Received {:?} bytes", received_data.len());
 
     // attempt to recieve a portal request
     let req: Portal = match Portal::parse(&received_data) {
@@ -47,7 +49,7 @@ pub fn register(
     let id = req.get_id();
     let dir = req.get_direction();
 
-    log::info!("[{:.6}] New Portal request: {:?}", id, dir);
+    log::info!("[{:.6}] New Portal request: {:?}({:?})", id, dir, addr);
 
     // Clear old entries before accepting, will keep
     // connections < 15 min old
@@ -80,8 +82,8 @@ pub fn register(
             // This pipe will be used to send data from Receiver->Sender
             // so the Sender will keep the read side, and the Receiver will
             // keep the write side
-            let pipe = match pipe() {
-                Ok(pipe) => pipe,
+            let (reader2, mut writer2) = match pipe() {
+                Ok((r, w)) => (r, w),
                 Err(err) => {
                     log::error!(
                         "[{:.6}] Error creating pipe for peer communication. Reason: {}",
@@ -91,8 +93,6 @@ pub fn register(
                     return Err(Box::new(err));
                 }
             };
-
-            let (reader2, mut writer2) = pipe;
 
             // write the acknowledgement response to both pipe endpoints
             let resp = req.serialize()?;
