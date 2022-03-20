@@ -40,19 +40,16 @@ pub fn tcp_splice(endpoint: &Endpoint, peer: &Endpoint) -> Result<bool> {
 
         // check if connection is closed
         if rx < 0 && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
-            return Ok(true);
-        }
-
-        if rx < 0 && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
             log::error!(
                 "[{:.6}] Error receiving data from {:?}: errno: {}",
                 id,
                 endpoint.dir,
                 errno
             );
-        } else if rx >= 0 {
-            log::debug!("[{:.6}] Received {} bytes from {:?}", id, rx, endpoint.dir);
+            return Ok(true);
         }
+
+        log::debug!("[{:.6}] Received {} bytes from {:?}", id, rx, endpoint.dir);
 
         /* We cannot break here on EWOULDBLOCK since the first splice may return EWOULDBLOCK
          * if the pipe is full, in that case we'd still want to complete the second splice
@@ -78,7 +75,13 @@ pub fn tcp_splice(endpoint: &Endpoint, peer: &Endpoint) -> Result<bool> {
 
         // check for errors
         if tx < 0 && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
-            log::error!("[{:.6}] Exiting due to trx: {:?} errno {:?}", id, tx, errno);
+            log::error!(
+                "[{:.6}] Exiting due to error splicing pipes from {:?}. trx: {:?} errno {:?}",
+                id,
+                endpoint.dir,
+                tx,
+                errno
+            );
             return Ok(true);
         }
 
@@ -87,20 +90,11 @@ pub fn tcp_splice(endpoint: &Endpoint, peer: &Endpoint) -> Result<bool> {
             break;
         }
 
-        if tx < 0 && errno != 0 {
-            log::error!(
-                "[{:.6}] Error relaying data to {:?}: errno: {}",
-                id,
-                endpoint.dir,
-                errno
-            );
-        } else {
-            log::debug!("[{:.6}] Sent {} bytes to {:?}", id, tx, peer.dir);
-        }
-
         if tx == 0 {
             return Ok(true);
         }
+
+        log::debug!("[{:.6}] Sent {} bytes to {:?}", id, tx, peer.dir);
     }
 
     Ok(false)
@@ -146,8 +140,9 @@ pub fn drain_pipe(endpoint: &Endpoint) -> Result<bool> {
         // check for errors
         if trx < 0 && errno != 0 && errno != libc::EWOULDBLOCK && errno != libc::EAGAIN {
             log::error!(
-                "[{:.6}] Exiting due to trx: {:?} errno {:?}",
+                "[{:.6}] Exiting due to error draining pipe to {:?}. trx: {:?} errno {:?}",
                 id,
+                endpoint.dir,
                 trx,
                 errno
             );
@@ -159,23 +154,17 @@ pub fn drain_pipe(endpoint: &Endpoint) -> Result<bool> {
             break;
         }
 
-        if trx < 0 && errno != 0 {
-            log::error!("[{:.6}] Error draining pipe. Errno: {}", id, errno);
-        }
-
-        if trx > 0 {
-            log::debug!(
-                "[{:.6}] Drained {} bytes to {:?}, errno: {:?}",
-                id,
-                trx,
-                endpoint.dir,
-                errno
-            );
-        }
-
         if trx == 0 {
             return Ok(true);
         }
+
+        log::debug!(
+            "[{:.6}] Drained {} bytes to {:?}, errno: {:?}",
+            id,
+            trx,
+            endpoint.dir,
+            errno
+        );
     }
 
     Ok(false)
