@@ -1,7 +1,10 @@
 [package]
 name = "portal-relay"
 version = "0.2.0"
-authors = ["landhb <landhb@github>"]
+authors = [
+    "landhb <landhb@github>",
+    "fina <code@felinira.net>",
+]
 edition = "2018"
 description = """
 The relay for Portal, a secure file transfer protocol.
