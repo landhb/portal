@@ -33,10 +33,10 @@ pub struct PortalFile {
  * data that must be transferred to the peer for
  * decryption
  */
-#[derive(Serialize, Deserialize, PartialEq)]
-struct StateMetadata {
-    nonce: Vec<u8>,
-    tag: Vec<u8>,
+#[derive(Serialize, Deserialize, PartialEq, Default)]
+pub struct StateMetadata {
+    pub nonce: Vec<u8>,
+    pub tag: Vec<u8>,
 }
 
 impl PortalFile {
@@ -59,7 +59,7 @@ impl PortalFile {
         // Generate random nonce
         let mut rng = rand::thread_rng();
         let rbytes = rng.gen::<[u8; 12]>();
-        let nonce = Nonce::from_slice(&rbytes); // 128-bits; unique per chunk
+        let nonce = Nonce::from_slice(&rbytes); // 128-bits; Used once for entire file
         self.state.nonce.extend(nonce);
 
         let tag = match self
@@ -77,6 +77,13 @@ impl PortalFile {
      * Decrypts the current PortalFile, by decrypting the mmap'd memory in-place
      */
     pub fn decrypt(&mut self) -> Result<()> {
+        // Verify nonce & tag lengths
+        if self.state.nonce.len() != std::mem::size_of::<Nonce>()
+            || self.state.tag.len() != std::mem::size_of::<Tag>()
+        {
+            return Err(PortalError::DecryptError.into());
+        }
+
         let nonce = Nonce::from_slice(&self.state.nonce);
         let tag = Tag::from_slice(&self.state.tag);
         match self
@@ -84,7 +91,7 @@ impl PortalFile {
             .decrypt_in_place_detached(nonce, b"", &mut self.mmap[..], &tag)
         {
             Ok(_) => Ok(()),
-            Err(_e) => Err(PortalError::EncryptError.into()),
+            Err(_e) => Err(PortalError::DecryptError.into()),
         }
     }
 
@@ -160,10 +167,7 @@ impl PortalFile {
         &'a self,
         chunk_size: usize,
     ) -> impl std::iter::Iterator<Item = &'a [u8]> {
-        PortalChunks::init(
-            &self.mmap[..], // TODO: verify that this is zero-copy
-            chunk_size,
-        )
+        PortalChunks::init(&self.mmap[..], chunk_size)
     }
 
     /**
@@ -178,6 +182,7 @@ impl PortalFile {
 
 #[cfg(test)]
 pub mod tests {
+    use crate::errors::PortalError;
     use crate::{Direction, Portal};
     use std::io::{Read, Write};
 
@@ -203,6 +208,47 @@ pub mod tests {
         fn flush(&mut self) -> Result<(), std::io::Error> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn test_failed_decryption() {
+        // receiver
+        let dir = Direction::Receiver;
+        let pass = "test".to_string();
+        let (mut receiver, receiver_msg) = Portal::init(dir, "id".to_string(), pass, None);
+
+        // sender
+        let dir = Direction::Sender;
+        let pass = "test".to_string();
+        let (mut sender, sender_msg) = Portal::init(dir, "id".to_string(), pass, None);
+
+        // we need a key to be able to encrypt
+        receiver.derive_key(sender_msg.as_slice()).unwrap();
+        sender.derive_key(receiver_msg.as_slice()).unwrap();
+
+        // encrypt the file
+        let mut file = sender.load_file("/etc/passwd").unwrap();
+        file.encrypt().unwrap();
+
+        // Test incorrect tag length path
+        let old_tag = file.state.tag.clone();
+        file.state.tag.truncate(0);
+        let result = file.decrypt();
+        assert!(result.is_err());
+        let _ = result.map_err(|e| match e.downcast_ref::<PortalError>() {
+            Some(PortalError::DecryptError) => anyhow::Ok(()),
+            _ => panic!("Unexpected error"),
+        });
+
+        // Test failed decryption path
+        file.state.tag = old_tag;
+        file.state.tag[0] += 1; // alter tag
+        let result = file.decrypt();
+        assert!(result.is_err());
+        let _ = result.map_err(|e| match e.downcast_ref::<PortalError>() {
+            Some(PortalError::DecryptError) => anyhow::Ok(()),
+            _ => panic!("Unexpected error"),
+        });
     }
 
     #[test]
