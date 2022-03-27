@@ -74,9 +74,15 @@ fn bench_file_sender(c: &mut Criterion) {
         })
     });
 
+    // Configure Criterion.rs with larger measurement times
+    // for larger files.
+    let mut group = c.benchmark_group("larger-files");
+    group.measurement_time(core::time::Duration::new(200, 0));
+    group.sample_size(10);
+
     // 100M
     let path = create_file(&tmp_dir, 100_000_000);
-    c.bench_function("encrypt & send 100M", |b| {
+    group.bench_function("encrypt & send 100M", |b| {
         b.iter(|| {
             let mut file = sender.load_file(&path).unwrap();
             file.encrypt().unwrap();
@@ -88,11 +94,6 @@ fn bench_file_sender(c: &mut Criterion) {
             assert!(total_size >= 100_000_000);
         })
     });
-
-    // Configure Criterion.rs with larger measurement times
-    /* for larger files.
-    let mut group = c.benchmark_group("larger-files");
-    group.measurement_time(core::time::Duration::new(60,0));
 
     //500M
     let path = create_file(&tmp_dir, 500_000_000);
@@ -108,7 +109,7 @@ fn bench_file_sender(c: &mut Criterion) {
     }));
 
 
-    group.finish(); */
+    group.finish();
 }
 
 criterion_group!(benches, bench_file_sender);

@@ -153,7 +153,7 @@ fn bench_file_receiver(c: &mut Criterion) {
     // Configure Criterion.rs with larger measurement times
     // for larger files.
     let mut group = c.benchmark_group("larger-files");
-    group.measurement_time(core::time::Duration::new(60, 0));
+    group.measurement_time(core::time::Duration::new(200, 0));
     group.sample_size(10);
 
     // 100M
@@ -185,7 +185,7 @@ fn bench_file_receiver(c: &mut Criterion) {
         })
     });
 
-    /* 500M
+    // 500M
     send_file(&mut sender, &mut stream, &tmp_dir, 500_000_000);
     let backup = stream.clone();
     group.bench_function("receive & decrypt 500M", |b| b.iter_custom(|iters| {
@@ -213,7 +213,7 @@ fn bench_file_receiver(c: &mut Criterion) {
             total_time += start.elapsed();
         }
         total_time
-    })); */
+    }));
 
     group.finish();
 }
