@@ -4,7 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased 0.3.0]
+
+### Added
+- Library Benchmarks in [PR8](https://github.com/landhb/portal/pull/8)
+
+### Changed
+- Metadata is now encrypted in [PR5](https://github.com/landhb/portal/pull/5)
+- Improved Relay logging in [PR7](https://github.com/landhb/portal/pull/7)
+
+### Fixed
+- N/A
 
 ## [0.2.0] - 2020-10-07
 ### Added
@@ -21,7 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial publication
 
+
+## Source - All Releases
+
 ```
-[0.2.0]: 
+[0.2.0]: https://github.com/landhb/portal/releases/tag/v0.2
 [0.1.0]: https://github.com/landhb/portal/tree/b228f9a8d0e765c1f4f2f37799df5d55483dfece
 ```
