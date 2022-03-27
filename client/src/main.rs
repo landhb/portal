@@ -6,7 +6,7 @@ use colored::*;
 use directories::UserDirs;
 use dns_lookup::lookup_host;
 use indicatif::{ProgressBar, ProgressStyle};
-use portal::Portal;
+use portal::{Portal, PortalConfirmation};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::io::Write;
@@ -60,7 +60,7 @@ macro_rules! log_wait {
 
 fn transfer(
     mut portal: Portal,
-    msg: Vec<u8>,
+    msg: PortalConfirmation,
     fpath: &str,
     mut client: std::net::TcpStream,
     is_reciever: bool,
@@ -149,9 +149,13 @@ fn transfer(
                 }
             };
 
-            pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
+            // Verify received size
+            if len as u64 != fsize {
+                log_error!("peer disconnected or download did not complete");
+                std::process::exit(-1);
+            }
 
-            assert_eq!(len as u64, fsize);
+            pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
 
             // Decrypt the file
             log_wait!("Decrypting file...");
