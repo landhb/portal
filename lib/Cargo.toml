@@ -17,6 +17,9 @@ repository = "https://github.com/landhb/portal"
 readme = "README.md"
 license = "Apache-2.0 OR MIT"
 
+[lib]
+bench = false
+
 [[bench]]
 name = "sending"
 harness = false

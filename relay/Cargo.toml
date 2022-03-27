@@ -16,7 +16,10 @@ repository = "https://github.com/landhb/portal"
 readme = "README.md"
 license = "Apache-2.0 OR MIT"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name="portal-relay"
+path="src/main.rs"
+bench = false
 
 
 [dependencies]
