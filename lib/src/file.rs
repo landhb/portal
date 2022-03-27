@@ -33,7 +33,7 @@ pub struct PortalFile {
  * data that must be transferred to the peer for
  * decryption
  */
-#[derive(Serialize, Deserialize, PartialEq, Default)]
+#[derive(Serialize, Deserialize, PartialEq, Default, Debug)]
 pub struct StateMetadata {
     pub nonce: Vec<u8>,
     pub tag: Vec<u8>,
@@ -100,7 +100,7 @@ impl PortalFile {
      * after encrypting a file to communicate state data to the peer that will
      * decrypt the file
      */
-    pub fn sync_file_state<W>(&mut self, mut writer: W) -> Result<usize>
+    pub fn sync_file_state<W>(&mut self, mut writer: &mut W) -> Result<usize>
     where
         W: std::io::Write,
     {
@@ -125,8 +125,6 @@ impl PortalFile {
         R: std::io::Read,
         F: Fn(u64),
     {
-        let mut buf = vec![0u8; crate::CHUNK_SIZE];
-
         // First deserialize the Nonce + Tag
         let remote_state: StateMetadata = bincode::deserialize_from(&mut reader)?;
         self.state.nonce.extend(&remote_state.nonce);
@@ -134,7 +132,7 @@ impl PortalFile {
 
         // Anything else is file data
         loop {
-            let len = match reader.read(&mut buf) {
+            let len = match reader.read(&mut self.mmap[self.pos..]) {
                 Ok(0) => {
                     return Ok(self.pos as u64);
                 }
@@ -143,7 +141,6 @@ impl PortalFile {
                 Err(e) => return Err(e.into()),
             };
 
-            (&mut self.mmap[self.pos..]).write_all(&buf[..len])?;
             self.pos += len;
             callback(self.pos as u64);
         }
