@@ -20,7 +20,7 @@ jobs:
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
-            name: main benchmarks
+            name: Mainline Benchmark Tracker
             tool: 'cargo'
             output-file-path: output.txt
             github-token: ${{ secrets.GITHUB_TOKEN }}
