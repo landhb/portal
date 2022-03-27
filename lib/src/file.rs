@@ -100,7 +100,7 @@ impl PortalFile {
      * after encrypting a file to communicate state data to the peer that will
      * decrypt the file
      */
-    pub fn sync_file_state<W>(&mut self, mut writer: &mut W) -> Result<usize>
+    pub fn sync_file_state<W>(&mut self, writer: &mut W) -> Result<usize>
     where
         W: std::io::Write,
     {
