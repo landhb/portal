@@ -12,9 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Metadata is now encrypted in [PR5](https://github.com/landhb/portal/pull/5)
 - Improved Relay logging in [PR7](https://github.com/landhb/portal/pull/7)
+- Changed signature of sync_file_state() method to not take a copy/ownership in [PR8](https://github.com/landhb/portal/pull/8). Required for benchmarking. And improves the ergonomics of the API.
 
 ### Fixed
-- N/A
+- Removed unecessary write in PortalFile::download_file() [PR9](https://github.com/landhb/portal/pull/9).
 
 ## [0.2.0] - 2020-10-07
 ### Added
