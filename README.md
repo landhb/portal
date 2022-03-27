@@ -23,7 +23,7 @@ On the first run, a configuration file will be created in:
 | Windows | `{FOLDERID_RoamingAppData}`           | C:\Users\Alice\AppData\Roaming\portal           |
 
 
-Note: The default relay is `portal-relay.landhb.dev`. Your peer must connect to the same portal-relay as you. You can change the relay to any domain/IP address in your config.
+Note: The default relay is `portal-relay.landhb.dev`. Your peer must connect to the same portal-relay as you. You can also host your own relay and change the value to any domain/IP address in your config.
 
 
 To send a file: 

@@ -33,7 +33,7 @@ pub struct PortalFile {
  * data that must be transferred to the peer for
  * decryption
  */
-#[derive(Serialize, Deserialize, PartialEq, Default)]
+#[derive(Serialize, Deserialize, PartialEq, Default, Debug)]
 pub struct StateMetadata {
     pub nonce: Vec<u8>,
     pub tag: Vec<u8>,
@@ -100,7 +100,7 @@ impl PortalFile {
      * after encrypting a file to communicate state data to the peer that will
      * decrypt the file
      */
-    pub fn sync_file_state<W>(&mut self, mut writer: W) -> Result<usize>
+    pub fn sync_file_state<W>(&mut self, writer: &mut W) -> Result<usize>
     where
         W: std::io::Write,
     {
