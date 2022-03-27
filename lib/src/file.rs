@@ -125,6 +125,8 @@ impl PortalFile {
         R: std::io::Read,
         F: Fn(u64),
     {
+        let mut buf = vec![0u8; crate::CHUNK_SIZE];
+
         // First deserialize the Nonce + Tag
         let remote_state: StateMetadata = bincode::deserialize_from(&mut reader)?;
         self.state.nonce.extend(&remote_state.nonce);
@@ -132,7 +134,7 @@ impl PortalFile {
 
         // Anything else is file data
         loop {
-            let len = match reader.read(&mut self.mmap[self.pos..]) {
+            let len = match reader.read(&mut buf) {
                 Ok(0) => {
                     return Ok(self.pos as u64);
                 }
@@ -141,6 +143,7 @@ impl PortalFile {
                 Err(e) => return Err(e.into()),
             };
 
+            (&mut self.mmap[self.pos..]).write_all(&buf[..len])?;
             self.pos += len;
             callback(self.pos as u64);
         }
