@@ -2,7 +2,7 @@ window.BENCHMARK_DATA = {
   "lastUpdate": 1648418844995,
   "repoUrl": "https://github.com/landhb/portal",
   "entries": {
-    "main benchmarks": [
+    "Mainline Benchmark Tracker": [
       {
         "commit": {
           "author": {
@@ -74,9 +74,7 @@ window.BENCHMARK_DATA = {
             "unit": "ns/iter"
           }
         ]
-      }
-    ],
-    "Mainline Benchmark Tracker": [
+      },
       {
         "commit": {
           "author": {
