@@ -28,7 +28,7 @@ jobs:
           uses: actions-rs/tarpaulin@v0.1
           with:
             version: '0.14.3'
-            args: '--lib'
+            args: '--lib --exclude-files benches/*'
 
         - name: Upload to codecov.io
           uses: codecov/codecov-action@v2
