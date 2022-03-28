@@ -12,7 +12,7 @@ For the client utility go to:
 cargo install portal-relay
 ```
 
-When run the binary listend on TCP port 13265 to broker connections between clients.
+When run the binary listens on TCP port 13265 to broker connections between clients.
 
 ### Diagram of Key Derivation
 
