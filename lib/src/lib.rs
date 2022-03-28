@@ -131,7 +131,7 @@ pub const DEFAULT_PORT: u16 = 13265;
 /**
  * Default chunk size
  */
-pub const CHUNK_SIZE: usize = 32768;
+pub const CHUNK_SIZE: usize = 65536;
 
 /**
  * A data format exchanged by each peer to derive
