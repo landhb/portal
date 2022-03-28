@@ -1,12 +1,12 @@
 //! Provides an interface into the PortalFile abstraction
 //!
 
-use anyhow::Result;
 use chacha20poly1305::ChaCha20Poly1305;
 use chacha20poly1305::{aead::AeadInPlace, Nonce, Tag};
 use memmap::MmapMut;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 use std::io::Write;
 
 use crate::chunks::PortalChunks;
@@ -55,7 +55,7 @@ impl PortalFile {
     /**
      * Encrypts the current PortalFile, by encrypting the mmap'd memory in-place
      */
-    pub fn encrypt(&mut self) -> Result<()> {
+    pub fn encrypt(&mut self) -> Result<(), Box<dyn Error>> {
         // Generate random nonce
         let mut rng = rand::thread_rng();
         let rbytes = rng.gen::<[u8; 12]>();
@@ -76,7 +76,7 @@ impl PortalFile {
     /**
      * Decrypts the current PortalFile, by decrypting the mmap'd memory in-place
      */
-    pub fn decrypt(&mut self) -> Result<()> {
+    pub fn decrypt(&mut self) -> Result<(), Box<dyn Error>> {
         // Verify nonce & tag lengths
         if self.state.nonce.len() != std::mem::size_of::<Nonce>()
             || self.state.tag.len() != std::mem::size_of::<Tag>()
@@ -100,7 +100,7 @@ impl PortalFile {
      * after encrypting a file to communicate state data to the peer that will
      * decrypt the file
      */
-    pub fn sync_file_state<W>(&mut self, writer: &mut W) -> Result<usize>
+    pub fn sync_file_state<W>(&mut self, writer: &mut W) -> Result<usize, Box<dyn Error>>
     where
         W: std::io::Write,
     {
@@ -120,7 +120,7 @@ impl PortalFile {
      * // send chunks
      * ```
      */
-    pub fn download_file<R, F>(&mut self, mut reader: R, callback: F) -> Result<u64>
+    pub fn download_file<R, F>(&mut self, mut reader: R, callback: F) -> Result<u64, Box<dyn Error>>
     where
         R: std::io::Read,
         F: Fn(u64),
@@ -170,7 +170,7 @@ impl PortalFile {
     /**
      * Writes the provided data to the file in-memory at the current position
      */
-    pub fn write_given_chunk(&mut self, data: &[u8]) -> Result<u64> {
+    pub fn write_given_chunk(&mut self, data: &[u8]) -> Result<u64, Box<dyn Error>> {
         (&mut self.mmap[self.pos..]).write_all(&data)?;
         self.pos += data.len();
         Ok(data.len() as u64)

@@ -5,6 +5,10 @@ use thiserror::Error;
 pub enum PortalError {
     #[error("Value doesn't exist")]
     NoneError,
+    #[error("Provided filename doesn't return a base filename")]
+    BadFileName,
+    #[error("Underlying crypto error")]
+    CryptoError,
     #[error("Incorrect Mutability")]
     Mutability,
     #[error("Bad registration")]
@@ -25,6 +29,8 @@ pub enum PortalError {
     Interrupted,
     #[error("WouldBlock")]
     WouldBlock,
+    #[error("Object could not be serialized")]
+    SerializeError,
     #[error("Disconnected")]
     Disconnect(#[from] io::Error),
 }

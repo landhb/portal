@@ -97,17 +97,18 @@
 //! // Decrypt the file
 //! file.decrypt().unwrap();
 //! ```
-use anyhow::Result;
 use memmap::MmapOptions;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
+use std::error::Error;
 use std::fs::File;
 use std::fs::OpenOptions;
+use std::io::{Read, Write};
 
 // Key Exchange
 use hkdf::Hkdf;
 use sha2::{Digest, Sha256};
-use spake2::{Ed25519Group, Identity, Password, SPAKE2};
+use spake2::{Ed25519Group, Identity, Password, Spake2};
 
 // File encryption
 use chacha20poly1305::aead::NewAead;
@@ -119,6 +120,10 @@ use rand::Rng;
 mod chunks;
 pub mod errors;
 pub mod file;
+
+/// Lower level protocol methods
+pub mod protocol;
+use protocol::*;
 
 use errors::PortalError::*;
 use file::{PortalFile, StateMetadata};
@@ -134,70 +139,29 @@ pub const DEFAULT_PORT: u16 = 13265;
 pub const CHUNK_SIZE: usize = 65536;
 
 /**
- * A data format exchanged by each peer to derive
- * the shared session key
- */
-pub type PortalConfirmation = [u8; 33];
-
-/**
  * The primary interface into the library. The Portal struct
  * contains data associated with either a new request or a response
  * from a peer.
  */
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(PartialEq, Debug)]
 pub struct Portal {
     // Information to correlate
     // connections on the relay
     id: String,
     direction: Direction,
 
+    // KeyExchange information
+    confirmation: PortalConfirmation,
+
     /// Metadata not sent until key is derived
-    #[serde(skip)]
     metadata: Metadata,
 
-    // Never serialized or sent to the relay
-    #[serde(skip)]
-    state: Option<SPAKE2<Ed25519Group>>,
+    // Crypto state used to derive the key
+    // once we receive a confirmation msg from the peer
+    state: Option<Spake2<Ed25519Group>>,
 
-    // Never serialized or sent to the relay
-    #[serde(skip)]
+    // Derived session key
     key: Option<Vec<u8>>,
-}
-
-/**
- * Metadata about the transfer to be exchanged
- * between peers after key derivation (encrypted)
- */
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
-pub struct Metadata {
-    filesize: u64,
-    filename: Option<Vec<u8>>,
-}
-
-/**
- * An enum to describe the direction of each file transfer
- * participant (i.e Sender/Receiver)
- */
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub enum Direction {
-    Sender,
-    Receiver,
-}
-
-/**
- * Method to compair arbitrary &[u8] slices, used internally
- * to compare key exchange and derivation data
- */
-fn compare_key_derivations(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
-    for (ai, bi) in a.iter().zip(b.iter()) {
-        match ai.cmp(&bi) {
-            std::cmp::Ordering::Equal => continue,
-            ord => return ord,
-        }
-    }
-
-    /* if every single element was equal, compare length */
-    a.len().cmp(&b.len())
 }
 
 impl Portal {
@@ -221,22 +185,27 @@ impl Portal {
         id: String,
         password: String,
         mut filename: Option<String>,
-    ) -> (Portal, PortalConfirmation) {
+    ) -> Result<Portal, Box<dyn Error>> {
         // hash the ID string
         let mut hasher = Sha256::new();
         hasher.update(&id);
         let id_bytes = hasher.finalize();
         let id_hash = hex::encode(&id_bytes);
 
-        let (s1, outbound_msg) = SPAKE2::<Ed25519Group>::start_symmetric(
+        // Initialize the state
+        let (s1, outbound_msg) = Spake2::<Ed25519Group>::start_symmetric(
             &Password::new(&password.as_bytes()),
             &Identity::new(&id_bytes),
         );
 
-        // if a file was provided, trim it to just the file name
+        // If a file was provided, trim it to just the file name
         if let Some(file) = filename {
             let f = std::path::Path::new(&file);
-            let f = f.file_name().unwrap().to_str().unwrap();
+            let f = f
+                .file_name()
+                .ok_or(BadFileName)?
+                .to_str()
+                .ok_or(BadFileName)?;
             filename = Some(f.to_string());
         }
 
@@ -246,88 +215,41 @@ impl Portal {
             filename: filename.map_or(None, |v| Some(v.as_bytes().to_vec())),
         };
 
-        (
-            Portal {
-                direction,
-                id: id_hash,
-                metadata,
-                state: Some(s1),
-                key: None,
-            },
-            outbound_msg.try_into().expect("Bad message format"),
-        )
+        Ok(Portal {
+            direction,
+            id: id_hash,
+            confirmation: outbound_msg.try_into().or(Err(CryptoError))?,
+            metadata,
+            state: Some(s1),
+            key: None,
+        })
     }
 
-    /**
-     * Initialize with existing data, attempting to deserialize bytes
-     * into a Portal struct
-     *
-     * # Example
-     *
-     * ```
-     * use portal_lib::Portal;
-     * use std::io::Read;
-     * fn example(mut client: std::net::TcpStream) {
-     *     let mut buf = [0; 1024];
-     *     let len = client.read(&mut buf);
-     *     let response = match Portal::parse(&buf) {
-     *          Ok(r) => r,
-     *          Err(_) => {
-     *               println!("Failed to read request/response...");
-     *               return;
-     *          }
-     *     };
-     * }
-     * ```
-     */
-    pub fn parse(data: &[u8]) -> Result<Portal> {
-        Ok(bincode::deserialize(&data)?)
-    }
+    /// Negotiate a secure connection over the insecure channel by performing the portal
+    /// handshake. Subsequent communication will be encrypted.
+    pub fn handshake<P: Read + Write>(&mut self, mut peer: P) -> Result<(), Box<dyn Error>> {
+        // Send the connection message. If the relay cannot
+        // match us with a peer this will fail.
+        Protocol::connect(peer, self.id, self.direction).or(Err(NoPeer))?;
 
-    /**
-     * Initialize by reading from a stream that implements the
-     * std::io::Read trait, consuming the bytes
-     *
-     * # Example
-     *
-     * ```
-     * use portal_lib::Portal;
-     * fn example(client: std::net::TcpStream) {
-     *     let response = match Portal::read_response_from(&client) {
-     *          Ok(r) => r,
-     *          Err(_) => {
-     *               println!("Failed to read response...");
-     *               return;
-     *          }
-     *     };
-     * }
-     * ```
-     */
-    pub fn read_response_from<R>(reader: R) -> Result<Portal>
-    where
-        R: std::io::Read,
-    {
-        Ok(bincode::deserialize_from::<R, Portal>(reader)?)
-    }
+        // after calling finish() the SPAKE2 struct will be consumed
+        // so we must replace the value stored in self.state
+        let state = std::mem::replace(&mut self.state, None);
+        let state = state.ok_or(BadState)?;
 
-    /**
-     * Receive the bytes necessary for a confirmation message
-     * from a stream that implements std::io::Read, consuming the bytes
-     */
-    pub fn read_confirmation_from<R>(mut reader: R) -> Result<PortalConfirmation>
-    where
-        R: std::io::Read,
-    {
-        let mut res: PortalConfirmation = [0u8; 33];
-        reader.read_exact(&mut res)?;
-        Ok(res)
+        // send our confirmation message and obtain our peer's
+
+        // derive the key
+
+        // confirm that the peer has the same key
+        Ok(())
     }
 
     /**
      * Receive the bytes necessary to receive file Metadata
      * from a stream that implements std::io::Read, consuming the bytes
      */
-    pub fn read_metadata_from<R>(&mut self, mut reader: R) -> Result<()>
+    pub fn read_metadata_from<R>(&mut self, mut reader: R) -> Result<(), Box<dyn Error>>
     where
         R: std::io::Read,
     {
@@ -368,7 +290,7 @@ impl Portal {
     /**
      * Encrypt & write file metadata to the peer
      */
-    pub fn write_metadata_to<W>(&mut self, mut writer: W) -> Result<usize>
+    pub fn write_metadata_to<W>(&mut self, mut writer: W) -> Result<usize, Box<dyn Error>>
     where
         W: std::io::Write,
     {
@@ -407,15 +329,15 @@ impl Portal {
 
     /**
      * Attempt to serialize a Portal struct into a vector
-     */
-    pub fn serialize(&self) -> Result<Vec<u8>> {
+     *
+    pub fn serialize(&self) -> Result<Vec<u8>, Box<dyn Error>> {
         Ok(bincode::serialize(&self)?)
-    }
+    }*/
 
     /*
      * mmap's a file into memory for reading
      */
-    pub fn load_file<'a>(&'a self, f: &str) -> Result<PortalFile> {
+    pub fn load_file<'a>(&'a self, f: &str) -> Result<PortalFile, Box<dyn Error>> {
         let file = File::open(f)?;
         let mmap = unsafe { MmapOptions::new().map_copy(&file)? };
 
@@ -430,7 +352,7 @@ impl Portal {
     /*
      * mmap's a file into memory for writing
      */
-    pub fn create_file<'a>(&'a self, f: &str, size: u64) -> Result<PortalFile> {
+    pub fn create_file<'a>(&'a self, f: &str, size: u64) -> Result<PortalFile, Box<dyn Error>> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -449,12 +371,12 @@ impl Portal {
         Ok(PortalFile::init(mmap, cipher))
     }
 
-    /**
+    /*
      * Derive a shared key with the exchanged data
      * at this point in the exchange we have not verified that our peer
      * has derived the same key as us
-     */
-    pub fn derive_key(&mut self, msg_data: &[u8]) -> Result<()> {
+     *
+    pub fn derive_key(&mut self, msg_data: &[u8]) -> Result<(), Box<dyn Error>> {
         // after calling finish() the SPAKE2 struct will be consumed
         // so we must replace the value stored in self.state
         let state = std::mem::replace(&mut self.state, None);
@@ -471,10 +393,10 @@ impl Portal {
         Ok(())
     }
 
-    /**
+    /*
      * Confirm that the peer has derived the same key
      */
-    pub fn confirm_peer<R>(&mut self, mut client: R) -> Result<()>
+    pub fn confirm_peer<R>(&mut self, mut client: R) -> Result<(), Box<dyn Error>>
     where
         R: std::io::Read + std::io::Write,
     {
@@ -515,7 +437,7 @@ impl Portal {
             }
         }
         Ok(())
-    }
+    }*/
 
     /**
      * Returns the file size associated with this request
@@ -535,7 +457,7 @@ impl Portal {
      * Returns the file name associated with this request
      * or a PortalError::NoneError if none exists
      */
-    pub fn get_file_name<'a>(&'a self) -> Result<&'a str> {
+    pub fn get_file_name<'a>(&'a self) -> Result<&'a str, Box<dyn Error>> {
         match &self.metadata.filename {
             Some(f) => Ok(std::str::from_utf8(f)?),
             None => Err(NoneError.into()),

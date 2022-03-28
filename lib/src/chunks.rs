@@ -1,9 +1,7 @@
 //! Provides an chunks based iterator over a PortalFile
 //!
 
-/**
- * An iterator of an mmap'd PortalFile
- */
+/// An iterator of an mmap'd PortalFile
 pub struct PortalChunks<'a, T: 'a> {
     v: &'a [T],
     chunk_size: usize,
