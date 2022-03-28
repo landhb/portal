@@ -1,5 +1,5 @@
 use crate::errors::PortalError::*;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::convert::TryInto;
 use std::error::Error;
 use std::io::{Read, Write};
@@ -10,9 +10,11 @@ use hkdf::Hkdf;
 use sha2::{Digest, Sha256};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 
+// Exchange message types
 mod exchange;
 pub use exchange::*;
 
+// Encrypted message types
 mod encrypted;
 pub use encrypted::*;
 
@@ -184,16 +186,41 @@ impl Protocol {
         Ok(())
     }
 
-    /// Read an encrypted metadata message from the peer
-    pub fn read_metadata_from<R: Read>(
+    /// Read an encrypted message from the peer
+    pub fn read_encrypted_from<R, D>(
         &mut self,
-        mut reader: R,
-    ) -> Result<Metadata, Box<dyn Error>> {
-        unimplemented!()
+        reader: &mut R,
+        key: &[u8],
+    ) -> Result<D, Box<dyn Error>>
+    where
+        R: Read,
+        D: DeserializeOwned,
+    {
+        // Receive the message, return error if not encrypted
+        let mut msg = match PortalMessage::recv(reader).or(Err(IOError))? {
+            PortalMessage::EncryptedData(inner) => inner,
+            _ => return Err(BadMsg.into()),
+        };
+
+        // Decrypt, deserialize, and return it
+        msg.decrypt_and_deserialize(key)
     }
 
-    /// Write an encrypted metadata message to the peer
-    pub fn write_metadata_to<W: Write>(&mut self, mut writer: W) -> Result<usize, Box<dyn Error>> {
-        unimplemented!()
+    /// Write an encrypted message to the peer
+    pub fn write_encrypted_to<W, S>(
+        &mut self,
+        writer: &mut W,
+        key: &[u8],
+        msg: &S,
+    ) -> Result<usize, Box<dyn Error>>
+    where
+        W: Write,
+        S: Serialize,
+    {
+        // Encrypt the data
+        let encmsg = EncryptedMessage::encrypt_and_serialize(key, msg)?;
+
+        // Wrap and send the data
+        PortalMessage::EncryptedData(encmsg).send(writer)
     }
 }

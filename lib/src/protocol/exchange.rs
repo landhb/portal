@@ -15,19 +15,7 @@ pub struct PortalKeyExchange([u8; 33]);
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub struct PortalConfirmation([u8; 42]);
 
-/*
-* Receive the bytes necessary for a confirmation message
-* from a stream that implements std::io::Read, consuming the bytes
-*
-pub fn read_confirmation_from<R>(mut reader: R) -> Result<PortalConfirmation, Box<dyn Error>>
-where
-    R: std::io::Read,
-{
-    let mut res: PortalConfirmation = [0u8; 33];
-    reader.read_exact(&mut res)?;
-    Ok(res)
-}*/
-
+/// Provide a serde visitor to serialize/deserialize larger arrays
 struct ArrayVisitor<T> {
     element: PhantomData<T>,
 }
