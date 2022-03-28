@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1648431767167,
+  "lastUpdate": 1648433726797,
   "repoUrl": "https://github.com/landhb/portal",
   "entries": {
     "Mainline Benchmark Tracker": [
@@ -215,6 +215,78 @@ window.BENCHMARK_DATA = {
             "name": "larger-files/encrypt & send 500M",
             "value": 1617243826,
             "range": "± 1670819",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "12598313+landhb@users.noreply.github.com",
+            "name": "Bradley Landherr",
+            "username": "landhb"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6dd0e3aa10d0e01a8a4cb71f57ce8415d4e145d0",
+          "message": "Return PortalConfirmation from Portal::init() (#10)\n\nCo-authored-by: landhb <landhb@users.noreply.github.com>",
+          "timestamp": "2022-03-27T21:55:35-04:00",
+          "tree_id": "c20ca9bea915d47837038f4fd13269d41af4b2e0",
+          "url": "https://github.com/landhb/portal/commit/6dd0e3aa10d0e01a8a4cb71f57ce8415d4e145d0"
+        },
+        "date": 1648433726424,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "receive & decrypt 100k",
+            "value": 557103,
+            "range": "± 19982",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "receive & decrypt 1M",
+            "value": 5592876,
+            "range": "± 167667",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "larger-files/receive & decrypt 100M",
+            "value": 836287114,
+            "range": "± 4535363",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "larger-files/receive & decrypt 500M",
+            "value": 4671163299,
+            "range": "± 162174756",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "encrypt & send 100k",
+            "value": 471495,
+            "range": "± 19045",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "encrypt & send 1M",
+            "value": 4159848,
+            "range": "± 81670",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "larger-files/encrypt & send 100M",
+            "value": 424337645,
+            "range": "± 3566017",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "larger-files/encrypt & send 500M",
+            "value": 2119694657,
+            "range": "± 25439851",
             "unit": "ns/iter"
           }
         ]
