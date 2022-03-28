@@ -1,104 +1,4 @@
-//! portal-lib
-//!
-//! A small Protocol Library for [Portal](https://github.com/landhb/portal) - An encrypted file transfer utility
-//!
-//! This crate enables a consumer to:
-//!
-//! - Create/serialize/deserialize Portal request/response messages.
-//! - Negoticate a symmetric key with a peer using [SPAKE2](https://docs.rs/spake2/0.2.0/spake2)
-//! - Encrypt files with [Chacha20poly1305](https://blog.cloudflare.com/it-takes-two-to-chacha-poly/) using the [RustCrypto implementation](https://github.com/rusticata/tls-parser)
-//! - Send/receive files through a Portal relay
-//!
-//!
-//! Example of SPAKE2 key negotiation:
-//!
-//! ```no_run
-//! use portal_lib::{Portal,Direction};
-//!
-//! // receiver
-//! let id = "id".to_string();
-//! let pass ="test".to_string();
-//! let (mut receiver,receiver_msg) = Portal::init(Direction::Receiver,id,pass,None);
-//!
-//! // sender
-//! let id = "id".to_string();
-//! let pass ="test".to_string();
-//! let (mut sender,sender_msg) = Portal::init(Direction::Sender,id,pass,None);
-//!
-//! // Both clients should derive the same key
-//! receiver.derive_key(&sender_msg).unwrap();
-//! sender.derive_key(&receiver_msg).unwrap();
-//!
-//! ```
-//! You can use the `Portal::confirm_peer()` method to verify that a remote peer has derived the same key
-//! as you, as long as the communication stream implements the std::io::Read and std::io::Write traits.
-//!
-//! Example of Sending a file:
-//!
-//! ```no_run
-//! use portal_lib::{Portal,Direction};
-//! use std::net::TcpStream;
-//! use std::io::Write;
-//!
-//! let mut client = TcpStream::connect("127.0.0.1:34254").unwrap();
-//!
-//! // Create portal request as the Sender
-//! let id = "id".to_string();
-//! let pass ="test".to_string();
-//! let (mut portal,msg) = Portal::init(Direction::Sender,id,pass,None);
-//!
-//! // complete key derivation + peer verification
-//!
-//! let mut file = portal.load_file("/tmp/test").unwrap();
-//!
-//! // Encrypt the file and share state
-//! file.encrypt().unwrap();
-//! file.sync_file_state(&mut client).unwrap();
-//!
-//! for data in file.get_chunks(portal_lib::CHUNK_SIZE) {
-//!     client.write_all(&data).unwrap();
-//! }
-//! ```
-//!
-//! Example of Receiving a file:
-//!
-//! ```no_run
-//! use portal_lib::{Portal,Direction};
-//! use std::net::TcpStream;
-//! use std::io::Write;
-//!
-//! let mut client = TcpStream::connect("127.0.0.1:34254").unwrap();
-//!
-//! // receiver
-//! let dir = Direction::Receiver;
-//! let pass ="test".to_string();
-//! let (mut portal,msg) = Portal::init(dir,"id".to_string(),pass,None);
-//!
-//! // serialize & send request
-//! let request = portal.serialize().unwrap();
-//! client.write_all(&request).unwrap();
-//!
-//! // get response
-//! let response = Portal::read_response_from(&client).unwrap();
-//!
-//! // complete key derivation + peer verification
-//!
-//! // create outfile
-//! let fsize = response.get_file_size();
-//! let mut file = portal.create_file("/tmp/test", fsize).unwrap();
-//!
-//! let callback = |x| { println!("Received {} bytes",x); };
-//!
-//! // Receive until connection is done
-//! let len = file.download_file(&client,callback).unwrap();
-//!
-//! assert_eq!(len as u64, fsize);
-//!
-//! // Decrypt the file
-//! file.decrypt().unwrap();
-//! ```
 use memmap::MmapOptions;
-use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::error::Error;
 use std::fs::File;
@@ -106,27 +6,25 @@ use std::fs::OpenOptions;
 use std::io::{Read, Write};
 
 // Key Exchange
-use hkdf::Hkdf;
 use sha2::{Digest, Sha256};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 
 // File encryption
 use chacha20poly1305::aead::NewAead;
-use chacha20poly1305::{aead::AeadInPlace, ChaCha20Poly1305, Key, Nonce, Tag};
-
-// Nonce generation
-use rand::Rng;
+use chacha20poly1305::{ChaCha20Poly1305, Key};
 
 mod chunks;
+mod file;
+
+// Allow users to access errors
 pub mod errors;
-pub mod file;
 
 /// Lower level protocol methods
 pub mod protocol;
 use protocol::*;
 
 use errors::PortalError::*;
-use file::{PortalFile, StateMetadata};
+use file::PortalFile;
 
 /**
  * Arbitrary port for the Portal protocol
@@ -165,21 +63,19 @@ pub struct Portal {
 }
 
 impl Portal {
-    /**
-     * Initialize a new portal request
-     *
-     * # Example
-     *
-     * ```
-     * use portal_lib::{Portal,Direction};
-     *
-     * // the shared password should be secret and hard to guess/crack
-     * // see the portal-client as an example of potential usage
-     * let id = "my client ID".to_string();
-     * let password = "testpasswd".to_string();
-     * let portal = Portal::init(Direction::Sender,id,password,None);
-     * ```
-     */
+    /// Initialize a new portal request
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use portal_lib::{Portal,Direction};
+    ///
+    /// // the shared password should be secret and hard to guess/crack
+    /// // see the portal-client as an example of potential usage
+    /// let id = String::from("my client ID");
+    /// let password = String::from("testpasswd");
+    /// let portal = Portal::init(Direction::Receiver,id,password,None);
+    /// ```
     pub fn init(
         direction: Direction,
         id: String,
@@ -227,6 +123,18 @@ impl Portal {
 
     /// Negotiate a secure connection over the insecure channel by performing the portal
     /// handshake. Subsequent communication will be encrypted.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::net::TcpStream;
+    ///
+    /// let portal = Portal::init(Direction::Sender,id,password,None);
+    /// let mut stream = TcpStream::connect("127.0.0.1:34254")?;
+    ///
+    /// // conduct the handshake with the peer
+    /// portal.handshake(&mut stream).unwrap();
+    /// ```
     pub fn handshake<P: Read + Write>(&mut self, peer: &mut P) -> Result<(), Box<dyn Error>> {
         // Send the connection message. If the relay cannot
         // match us with a peer this will fail.
@@ -249,99 +157,78 @@ impl Portal {
         Ok(())
     }
 
-    /**
-     * Receive the bytes necessary to receive file Metadata
-     * from a stream that implements std::io::Read, consuming the bytes
-     */
-    pub fn read_metadata_from<R>(&mut self, mut reader: R) -> Result<(), Box<dyn Error>>
+    /// Send a given file over the portal. Must be called after performing the
+    /// handshake or this method will return an error.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// // The handshake must be performed first, otherwise
+    /// // there is no shared key to encrypt the file with
+    /// portal.handshake(&mut client);
+    ///
+    /// // Optional: implement a custom callback to display how much
+    /// // has been transferred
+    /// fn progress(transferred: usize) {
+    ///     println!("sent {:?} bytes", transferred);
+    /// }
+    ///
+    /// // Begin sending the file
+    /// portal.send_file(&mut client, "/etc/passwd", Some(progress));
+    /// ```
+    pub fn send_file<W, D>(
+        &mut self,
+        peer: &mut W,
+        path: &str,
+        callback: Option<D>,
+    ) -> Result<(), Box<dyn Error>>
     where
-        R: std::io::Read,
+        W: Write,
+        D: Fn(u64),
     {
-        // Obtain the cipher from the key
-        let key = self.key.as_ref().ok_or(NoPeer)?;
-        let cha_key = Key::from_slice(&key[..]);
-        let cipher = ChaCha20Poly1305::new(cha_key);
-
-        // Receive the encryption state
-        let state: StateMetadata = bincode::deserialize_from(&mut reader).or(Err(BadMsg))?;
-
-        // Receive the data
-        let mut data: Vec<u8> = bincode::deserialize_from(&mut reader).or(Err(BadMsg))?;
-
-        // Verify nonce & tag lengths
-        if state.nonce.len() != std::mem::size_of::<Nonce>()
-            || state.tag.len() != std::mem::size_of::<Tag>()
-        {
-            return Err(BadState.into());
-        }
-
-        // Decrypt the data
-        let nonce = Nonce::from_slice(&state.nonce);
-        let tag = Tag::from_slice(&state.tag);
-        match cipher.decrypt_in_place_detached(&nonce, b"", &mut data, &tag) {
-            Ok(_) => {}
-            Err(_e) => return Err(DecryptError.into()),
-        }
-
-        // Validate the metadata
-        let mdata: Metadata = bincode::deserialize(&data)?;
-
-        // Save to self
-        self.metadata = mdata;
-        Ok(())
+        unimplemented!()
     }
 
-    /**
-     * Encrypt & write file metadata to the peer
-     */
-    pub fn write_metadata_to<W>(&mut self, mut writer: W) -> Result<usize, Box<dyn Error>>
+    /// Receive the next file over the portal. Must be called after performing
+    /// the handshake or this method will return an error.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// // The handshake must be performed first, otherwise
+    /// // there is no shared key to encrypt the file with
+    /// portal.handshake(&mut client);
+    ///
+    /// // Optional: User callback to confirm/deny a transfer. If
+    /// // none is provided, this will default accept the incoming file.
+    /// // Return true to accept, false to reject the transfer.
+    /// fn confirm_download(path: &str, size: usize) -> bool { true }
+    ///
+    /// // Optional: implement a custom callback to display how much
+    /// // has been transferred
+    /// fn progress(transferred: usize) {
+    ///     println!("received {:?} bytes", transferred);
+    /// }
+    ///
+    /// // Begin receiving the file
+    /// portal.recv_file(&mut client, Some(verify_callback), Some(display_callback));
+    /// ```
+    pub fn recv_file<R, V, D>(
+        &mut self,
+        peer: &mut R,
+        verify: Option<V>,
+        display: Option<D>,
+    ) -> Result<(), Box<dyn Error>>
     where
-        W: std::io::Write,
+        R: Read,
+        V: Fn(&str, u64) -> bool,
+        D: Fn(u64),
     {
-        // Init state to send
-        let mut state = StateMetadata::default();
-
-        // Generate random nonce
-        let mut rng = rand::thread_rng();
-        let rbytes = rng.gen::<[u8; 12]>();
-        let nonce = Nonce::from_slice(&rbytes);
-        state.nonce.extend(nonce);
-
-        // Obtain the cipher from the key
-        let key = self.key.as_ref().ok_or(NoPeer)?;
-        let cha_key = Key::from_slice(&key[..]);
-        let cipher = ChaCha20Poly1305::new(cha_key);
-
-        // Serialize all the metadata
-        let mut data: Vec<u8> = bincode::serialize(&self.metadata)?;
-
-        // Encrypt the metadata in-place
-        let tag = match cipher.encrypt_in_place_detached(nonce, b"", &mut data) {
-            Ok(tag) => tag,
-            Err(_e) => return Err(EncryptError.into()),
-        };
-        state.tag.extend(tag);
-
-        // Wrap the encrypted buffer so that it may be deserialized
-        let mut finaldata = bincode::serialize(&state)?;
-        finaldata.extend_from_slice(&bincode::serialize(&data)?);
-
-        // Send the encrypted state & metadata
-        writer.write_all(&finaldata).or(Err(IOError))?;
-        Ok(data.len())
+        unimplemented!()
     }
 
-    /**
-     * Attempt to serialize a Portal struct into a vector
-     *
-    pub fn serialize(&self) -> Result<Vec<u8>, Box<dyn Error>> {
-        Ok(bincode::serialize(&self)?)
-    }*/
-
-    /*
-     * mmap's a file into memory for reading
-     */
-    pub fn load_file<'a>(&'a self, f: &str) -> Result<PortalFile, Box<dyn Error>> {
+    /// mmap's a file into memory for reading
+    fn map_readable_file<'a>(&'a self, f: &str) -> Result<PortalFile, Box<dyn Error>> {
         let file = File::open(f)?;
         let mmap = unsafe { MmapOptions::new().map_copy(&file)? };
 
@@ -353,10 +240,8 @@ impl Portal {
         Ok(PortalFile::init(mmap, cipher))
     }
 
-    /*
-     * mmap's a file into memory for writing
-     */
-    pub fn create_file<'a>(&'a self, f: &str, size: u64) -> Result<PortalFile, Box<dyn Error>> {
+    /// mmap's a file into memory for writing
+    fn map_writeable_file<'a>(&'a self, f: &str, size: u64) -> Result<PortalFile, Box<dyn Error>> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -374,74 +259,6 @@ impl Portal {
 
         Ok(PortalFile::init(mmap, cipher))
     }
-
-    /*
-     * Derive a shared key with the exchanged data
-     * at this point in the exchange we have not verified that our peer
-     * has derived the same key as us
-     *
-    pub fn derive_key(&mut self, msg_data: &[u8]) -> Result<(), Box<dyn Error>> {
-        // after calling finish() the SPAKE2 struct will be consumed
-        // so we must replace the value stored in self.state
-        let state = std::mem::replace(&mut self.state, None);
-
-        let state = state.ok_or(BadState)?;
-
-        self.key = match state.finish(msg_data) {
-            Ok(res) => Some(res),
-            Err(_) => {
-                return Err(BadMsg.into());
-            }
-        };
-
-        Ok(())
-    }
-
-    /*
-     * Confirm that the peer has derived the same key
-     */
-    pub fn confirm_peer<R>(&mut self, mut client: R) -> Result<(), Box<dyn Error>>
-    where
-        R: std::io::Read + std::io::Write,
-    {
-        let key = self.key.as_ref().ok_or(NoPeer)?;
-
-        let sender_info = format!("{}-{}", self.id, "senderinfo");
-        let receiver_info = format!("{}-{}", self.id, "receiverinfo");
-
-        // Perform key confirmation step
-        let h = Hkdf::<Sha256>::new(None, &key);
-        let mut peer_msg = [0u8; 42];
-        let mut sender_confirm = [0u8; 42];
-        let mut receiver_confirm = [0u8; 42];
-        h.expand(&sender_info.as_bytes(), &mut sender_confirm)
-            .unwrap();
-        h.expand(&receiver_info.as_bytes(), &mut receiver_confirm)
-            .unwrap();
-
-        match self.direction {
-            Direction::Sender => {
-                client.write_all(&sender_confirm)?;
-                client.read_exact(&mut peer_msg)?;
-
-                if compare_key_derivations(&peer_msg, &receiver_confirm)
-                    != std::cmp::Ordering::Equal
-                {
-                    return Err(BadMsg.into());
-                }
-            }
-            Direction::Receiver => {
-                client.write_all(&receiver_confirm)?;
-                client.read_exact(&mut peer_msg)?;
-
-                if compare_key_derivations(&peer_msg, &sender_confirm) != std::cmp::Ordering::Equal
-                {
-                    return Err(BadMsg.into());
-                }
-            }
-        }
-        Ok(())
-    }*/
 
     /**
      * Returns the file size associated with this request

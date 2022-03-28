@@ -5,10 +5,9 @@ use std::error::Error;
 use std::io::{Read, Write};
 
 // Crypto
-use chacha20poly1305::{Nonce, Tag};
 use hkdf::Hkdf;
-use sha2::{Digest, Sha256};
-use spake2::{Ed25519Group, Identity, Password, Spake2};
+use sha2::Sha256;
+use spake2::{Ed25519Group, Spake2};
 
 // Exchange message types
 mod exchange;
