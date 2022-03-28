@@ -21,7 +21,6 @@ name="portal-relay"
 path="src/main.rs"
 bench = false
 
-
 [dependencies]
 portal-lib = {path = "../lib",version = "0.3.0"}
 mio = "0.6.22" 
@@ -31,7 +30,7 @@ libc = "0.2.77" # splice syscall
 daemonize = "0.4.1"
 lazy_static = "1.4.0"
 threadpool = "1.8.1"
-#ipc-channel = "0.11.0"
+structopt = { version = "0.3", default-features = false }
 mio-extras = "2.0.6"
 env_logger = "0.9.0"
 log = "0.4.14"

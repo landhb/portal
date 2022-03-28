@@ -188,32 +188,31 @@ fn bench_file_receiver(c: &mut Criterion) {
     // 500M
     send_file(&mut sender, &mut stream, &tmp_dir, 500_000_000);
     let backup = stream.clone();
-    group.bench_function("receive & decrypt 500M", |b| b.iter_custom(|iters| {
-        let mut total_time = Duration::ZERO;
-        for _i in 0..iters {
+    group.bench_function("receive & decrypt 500M", |b| {
+        b.iter_custom(|iters| {
+            let mut total_time = Duration::ZERO;
+            for _i in 0..iters {
+                // Each iteration must have a new stream to consume
+                stream = backup.clone();
 
-            // Each iteration must have a new stream to consume
-            stream = backup.clone();
+                // Begin timing after the setup is done
+                let start = Instant::now();
 
-            // Begin timing after the setup is done
-            let start = Instant::now();
+                // use download_file to read in the file data
+                let mut new_file = receiver
+                    .create_file(results_path.to_str().unwrap(), 500_000_000)
+                    .unwrap();
 
-            // use download_file to read in the file data
-            let mut new_file = receiver
-                .create_file(results_path.to_str().unwrap(), 500_000_000)
-                .unwrap();
+                new_file.download_file(&mut stream, |_x| {}).unwrap();
 
-            new_file
-                .download_file(&mut stream, |_x| {})
-                .unwrap();
+                new_file.decrypt().unwrap(); // should not panic
 
-            new_file.decrypt().unwrap(); // should not panic
-
-            // End timing
-            total_time += start.elapsed();
-        }
-        total_time
-    }));
+                // End timing
+                total_time += start.elapsed();
+            }
+            total_time
+        })
+    });
 
     group.finish();
 }

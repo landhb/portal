@@ -1,6 +1,7 @@
 extern crate portal_lib as portal;
 
 use env_logger::Env;
+use log;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::channel::channel;
@@ -9,12 +10,12 @@ use portal::Direction;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
+use std::fs::OpenOptions;
 use std::rc::Rc;
 use std::sync::Mutex;
 use std::time::SystemTime;
+use structopt::StructOpt;
 use threadpool::ThreadPool;
-
-use log;
 
 #[macro_use]
 extern crate lazy_static;
@@ -63,12 +64,28 @@ pub struct EndpointPair {
     receiver_token: Token,
 }
 
-#[cfg(not(debug_assertions))]
+#[derive(Debug, StructOpt)]
+#[structopt(name = "portal-relay", about = "A relay for Portal.")]
+struct Opt {
+    /// Activate daemon mode
+    /// short and long flags (-b, --background)
+    #[structopt(short, long)]
+    background: bool,
+}
+
 fn daemonize() -> Result<(), daemonize::DaemonizeError> {
     use daemonize::Daemonize;
 
-    let stdout = std::fs::File::create("/tmp/relay.out").unwrap();
-    let stderr = std::fs::File::create("/tmp/relay.err").unwrap();
+    let stdout = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open("/tmp/relay.out")
+        .unwrap();
+    let stderr = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open("/tmp/relay.err")
+        .unwrap();
 
     let daemonize = Daemonize::new()
         .pid_file("/tmp/relay.pid")
@@ -90,9 +107,12 @@ pub fn next(current: &mut Token) -> Token {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // Only daemonize in release
-    #[cfg(not(debug_assertions))]
-    daemonize()?;
+    let opt = Opt::from_args();
+
+    // Only daemonize if given --background
+    if opt.background {
+        daemonize()?;
+    }
 
     // Initialize logging
     env_logger::Builder::from_env(Env::default().default_filter_or("info"))
