@@ -1,5 +1,6 @@
 use crate::errors::PortalError::*;
 use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 use std::error::Error;
 use std::io::{Read, Write};
 
@@ -9,8 +10,8 @@ use hkdf::Hkdf;
 use sha2::{Digest, Sha256};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 
-mod confirmation;
-pub use confirmation::*;
+mod exchange;
+pub use exchange::*;
 
 mod encrypted;
 pub use encrypted::*;
@@ -22,7 +23,7 @@ pub struct Protocol;
 
 /// An enum to describe the direction of each file transfer
 /// participant (i.e Sender/Receiver)
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Copy, Clone)]
 pub enum Direction {
     Sender,
     Receiver,
@@ -52,7 +53,10 @@ pub enum PortalMessage {
     Connect(ConnectMessage),
 
     /// SPAKE2 Key Derivation Information
-    KeyExchange(PortalConfirmation),
+    KeyExchange(PortalKeyExchange),
+
+    /// SPAKE2 Key Confirmation Information
+    Confirm(PortalConfirmation),
 
     /// All other messages are encrypted. This
     /// can be either metadata or a file chunk
@@ -61,15 +65,15 @@ pub enum PortalMessage {
 
 impl PortalMessage {
     /// Send an arbitrary PortalMessage
-    pub fn send<W: Write>(&mut self, mut writer: W) -> Result<usize, Box<dyn Error>> {
+    pub fn send<W: Write>(&mut self, writer: &mut W) -> Result<usize, Box<dyn Error>> {
         let data = bincode::serialize(&self).or(Err(SerializeError))?;
         writer.write_all(&data).or(Err(IOError))?;
         Ok(data.len())
     }
 
     /// Receive an arbitrary PortalMessage
-    pub fn recv<R: Read>(mut reader: R) -> Result<Self, Box<dyn Error>> {
-        Ok(bincode::deserialize_from::<R, PortalMessage>(reader)?)
+    pub fn recv<R: Read>(reader: &mut R) -> Result<Self, Box<dyn Error>> {
+        Ok(bincode::deserialize_from::<&mut R, PortalMessage>(reader)?)
     }
 
     /// Deserialize from existing data
@@ -79,20 +83,33 @@ impl PortalMessage {
 }
 
 impl Protocol {
-    /// Connect to a peer & receive the initial message
+    /// Connect to a peer & receive the initial exchange data
     pub fn connect<P: Read + Write>(
-        mut peer: P,
-        id: String,
+        peer: &mut P,
+        id: &str,
         direction: Direction,
-    ) -> Result<(), Box<dyn Error>> {
-        // Send the connect message
-        let sent = PortalMessage::Connect(ConnectMessage { id, direction }).send(peer)?;
+        msg: PortalKeyExchange,
+    ) -> Result<PortalKeyExchange, Box<dyn Error>> {
+        // Send the connect message.
+        let _ = PortalMessage::Connect(ConnectMessage {
+            id: id.to_owned(),
+            direction,
+        })
+        .send(peer)?;
 
-        // Recv the peer's equivalent message
+        // Recv the peer's equivalent peering/connect message
         // TODO: currently nothing is done with this, however
         // this may be useful for future P2P protocols
-        let _info = match PortalMessage::recv(peer) {};
-        Ok(())
+        let _info = PortalMessage::recv(peer)?;
+
+        // Send the exchange data
+        let _ = PortalMessage::KeyExchange(msg).send(peer)?;
+
+        // Recv the peer's data
+        match PortalMessage::recv(peer).or(Err(IOError))? {
+            PortalMessage::KeyExchange(data) => Ok(data.try_into().or(Err(BadMsg))?),
+            _ => Err(Box::new(BadMsg)),
+        }
     }
 
     /// Derive a shared key with the exchanged PortalConfirmation data.
@@ -100,9 +117,9 @@ impl Protocol {
     /// has derived the same key as us, just derived the key for ourselves.
     pub fn derive_key(
         state: Spake2<Ed25519Group>,
-        peer_data: &PortalConfirmation,
+        peer_data: &PortalKeyExchange,
     ) -> Result<Vec<u8>, Box<dyn Error>> {
-        match state.finish(peer_data) {
+        match state.finish(peer_data.into()) {
             Ok(res) => Ok(res),
             Err(_) => {
                 return Err(BadMsg.into());
@@ -116,7 +133,7 @@ impl Protocol {
         id: &str,
         direction: Direction,
         key: &[u8],
-        mut client: P,
+        peer: &mut P,
     ) -> Result<(), Box<dyn Error>> {
         // Arbitrary info that both sides can derive
         let sender_info = format!("{}-{}", id, "senderinfo");
@@ -139,13 +156,13 @@ impl Protocol {
         };
 
         // Send our data
-        client.write_all(&to_send)?;
+        peer.write_all(&to_send)?;
 
         // Receive the peer's version
-        client.read_exact(&mut peer_msg)?;
+        peer.read_exact(&mut peer_msg)?;
 
         /// Helper method to compair arbitrary &[u8] slices, used internally
-        /// to compare key exchange and derivation data
+        /// to compare key confirmation data
         fn compare_key_derivations(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
             for (ai, bi) in a.iter().zip(b.iter()) {
                 match ai.cmp(&bi) {

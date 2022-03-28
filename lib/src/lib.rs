@@ -151,7 +151,7 @@ pub struct Portal {
     direction: Direction,
 
     // KeyExchange information
-    confirmation: PortalConfirmation,
+    exchange: PortalKeyExchange,
 
     /// Metadata not sent until key is derived
     metadata: Metadata,
@@ -218,7 +218,7 @@ impl Portal {
         Ok(Portal {
             direction,
             id: id_hash,
-            confirmation: outbound_msg.try_into().or(Err(CryptoError))?,
+            exchange: outbound_msg.try_into().or(Err(CryptoError))?,
             metadata,
             state: Some(s1),
             key: None,
@@ -227,21 +227,25 @@ impl Portal {
 
     /// Negotiate a secure connection over the insecure channel by performing the portal
     /// handshake. Subsequent communication will be encrypted.
-    pub fn handshake<P: Read + Write>(&mut self, mut peer: P) -> Result<(), Box<dyn Error>> {
+    pub fn handshake<P: Read + Write>(&mut self, peer: &mut P) -> Result<(), Box<dyn Error>> {
         // Send the connection message. If the relay cannot
         // match us with a peer this will fail.
-        Protocol::connect(peer, self.id, self.direction).or(Err(NoPeer))?;
+        let confirm =
+            Protocol::connect(peer, &self.id, self.direction, self.exchange).or(Err(NoPeer))?;
 
         // after calling finish() the SPAKE2 struct will be consumed
         // so we must replace the value stored in self.state
         let state = std::mem::replace(&mut self.state, None);
         let state = state.ok_or(BadState)?;
 
-        // send our confirmation message and obtain our peer's
-
-        // derive the key
+        // Derive the session key
+        let key = Protocol::derive_key(state, &confirm).or(Err(BadMsg))?;
 
         // confirm that the peer has the same key
+        Protocol::confirm_peer(&self.id, self.direction, &key, peer)?;
+
+        // Set key for further use
+        self.key = Some(key);
         Ok(())
     }
 
