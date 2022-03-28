@@ -97,10 +97,10 @@
 //! // Decrypt the file
 //! file.decrypt().unwrap();
 //! ```
-
 use anyhow::Result;
 use memmap::MmapOptions;
 use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 use std::fs::File;
 use std::fs::OpenOptions;
 
@@ -131,7 +131,7 @@ pub const DEFAULT_PORT: u16 = 13265;
 /**
  * Default chunk size
  */
-pub const CHUNK_SIZE: usize = 65535;
+pub const CHUNK_SIZE: usize = 32768;
 
 /**
  * A data format exchanged by each peer to derive
@@ -221,7 +221,7 @@ impl Portal {
         id: String,
         password: String,
         mut filename: Option<String>,
-    ) -> (Portal, Vec<u8>) {
+    ) -> (Portal, PortalConfirmation) {
         // hash the ID string
         let mut hasher = Sha256::new();
         hasher.update(&id);
@@ -254,7 +254,7 @@ impl Portal {
                 state: Some(s1),
                 key: None,
             },
-            outbound_msg,
+            outbound_msg.try_into().expect("Bad message format"),
         )
     }
 
