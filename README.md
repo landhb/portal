@@ -38,8 +38,8 @@ To receive a file:
 portal recv
 ```
 
-
 ### Relay Install
+[![cargo-badge-relay][]][cargo-relay] 
 
 If you wish to run your own relay, you can install the binary on a server with:
 
@@ -83,6 +83,8 @@ This tool works extremely similarly to Wormhole written by [Brian Warner](https:
 [rust-version-badge]: https://img.shields.io/badge/rust-latest%20stable-blue.svg?style=flat-square
 [rust-version]: #rust-version-policy
 
+[cargo-badge-relay]: https://img.shields.io/crates/v/portal-relay.svg?style=flat-square&label=portal-relay
+[cargo-relay]: https://crates.io/crates/portal-relay
 [cargo-badge-client]: https://img.shields.io/crates/v/portal-client.svg?style=flat-square&label=portal-client
 [cargo-client]: https://crates.io/crates/portal-client
 [cargo-badge-lib]: https://img.shields.io/crates/v/portal-lib.svg?style=flat-square&label=portal-lib
