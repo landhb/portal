@@ -1,7 +1,8 @@
 use mio::net::TcpStream;
 use mio::Token;
 use os_pipe::pipe;
-use portal_lib::Portal;
+use portal_lib::errors::PortalError;
+use portal_lib::protocol::{ConnectMessage, PortalMessage};
 use std::error::Error;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -37,17 +38,17 @@ pub fn register(
     log::trace!("[?] Received {:?} bytes", received_data.len());
 
     // attempt to recieve a portal request
-    let req: Portal = match Portal::parse(&received_data) {
-        Ok(r) => r,
-        Err(e) => {
-            log::debug!("Failed to parse portal request: {:?}", e);
-            return Err(e.into());
+    let req: ConnectMessage = match PortalMessage::parse(&received_data)? {
+        PortalMessage::Connect(r) => r,
+        x => {
+            log::debug!("Got incorrect PortalMessage: {:?}", x);
+            return Err(PortalError::BadMsg.into());
         }
     };
 
     // Lookup existing endpoint with this ID
-    let id = req.get_id();
-    let dir = req.get_direction();
+    let id = req.id;
+    let dir = req.direction;
 
     log::info!("[{:.6}] New Portal request: {:?}({:?})", id, dir, addr);
 
@@ -95,8 +96,7 @@ pub fn register(
             };
 
             // write the acknowledgement response to both pipe endpoints
-            let resp = req.serialize()?;
-            writer2.write_all(&resp)?;
+            writer2.write_all(&received_data)?;
 
             log::debug!("[{:.6}] Acknowledgement sent to peer", id);
 
@@ -151,8 +151,8 @@ pub fn register(
                 }
             }
 
-            let resp = req.serialize()?;
-            writer.write_all(&resp)?;
+            // Buffer this request in the pipe for when the peer connects
+            writer.write_all(&received_data)?;
 
             let endpoint = Endpoint {
                 id: id.to_string(),
