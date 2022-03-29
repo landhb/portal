@@ -1,3 +1,4 @@
+use crate::chunks::PortalChunks;
 use crate::errors::PortalError::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::convert::TryInto;
@@ -43,7 +44,7 @@ pub struct ConnectMessage {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
 pub struct Metadata {
     pub filesize: u64,
-    pub filename: Option<Vec<u8>>,
+    pub filename: Vec<u8>,
 }
 
 /// The wrapped message type for every exchanged message
@@ -61,7 +62,7 @@ pub enum PortalMessage {
 
     /// All other messages are encrypted. This
     /// can be either metadata or a file chunk
-    EncryptedData(EncryptedMessage),
+    EncryptedDataHeader(EncryptedMessage),
 }
 
 impl PortalMessage {
@@ -186,11 +187,7 @@ impl Protocol {
     }
 
     /// Read an encrypted owned & deserialize-able object from the peer.
-    pub fn read_encrypted_from<R, D>(
-        &mut self,
-        reader: &mut R,
-        key: &[u8],
-    ) -> Result<D, Box<dyn Error>>
+    pub fn read_encrypted_from<R, D>(reader: &mut R, key: &[u8]) -> Result<D, Box<dyn Error>>
     where
         R: Read,
         D: DeserializeOwned,
@@ -199,7 +196,7 @@ impl Protocol {
         let mut storage = [0u8; 2048];
 
         // Receive the message into the storage region
-        self.read_encrypted_zero_copy(reader, key, &mut storage)?;
+        Protocol::read_encrypted_zero_copy(reader, key, &mut storage)?;
 
         // Deserialize the result
         bincode::deserialize(&storage).or(Err(BadMsg.into()))
@@ -210,7 +207,6 @@ impl Protocol {
     /// the ability to receive an encrypted chunk and decrypt it entirely
     /// in-place without extra copies.
     pub fn read_encrypted_zero_copy<R>(
-        &mut self,
         reader: &mut R,
         key: &[u8],
         storage: &mut [u8],
@@ -218,9 +214,9 @@ impl Protocol {
     where
         R: Read,
     {
-        // Receive the message header, return error if not EncryptedData
+        // Receive the message header, return error if not EncryptedDataHeader
         let mut msg = match PortalMessage::recv(reader).or(Err(IOError))? {
-            PortalMessage::EncryptedData(inner) => inner,
+            PortalMessage::EncryptedDataHeader(inner) => inner,
             _ => return Err(BadMsg.into()),
         };
 
@@ -246,9 +242,8 @@ impl Protocol {
         msg.decrypt_in_place(key, storage)
     }
 
-    /// Write an encrypted message to the peer
+    /// Encrypt & send an entire object to the peer
     pub fn write_encrypted_to<W, S>(
-        &mut self,
         writer: &mut W,
         key: &[u8],
         msg: &S,
@@ -263,7 +258,28 @@ impl Protocol {
         // Encrypt the data
         let encmsg = EncryptedMessage::encrypt(key, &mut data)?;
 
-        // Wrap and send the data
-        PortalMessage::EncryptedData(encmsg).send(writer)
+        // Wrap and send the header
+        PortalMessage::EncryptedDataHeader(encmsg).send(writer)?;
+
+        // Send the data
+        writer.write_all(&data).or(Err(IOError))?;
+
+        Ok(data.len())
+    }
+
+    /// Encrypt & send the EncryptedDataHeader to the peer
+    pub fn write_encrypted_message_header<W>(
+        writer: &mut W,
+        key: &[u8],
+        data: &mut [u8],
+    ) -> Result<usize, Box<dyn Error>>
+    where
+        W: Write,
+    {
+        // Encrypt the entire region in-place
+        let header = EncryptedMessage::encrypt(key, data)?;
+
+        // Send the EncryptedMessage header
+        PortalMessage::EncryptedDataHeader(header).send(writer)
     }
 }

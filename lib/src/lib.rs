@@ -1,4 +1,4 @@
-use memmap::MmapOptions;
+use memmap::{MmapMut, MmapOptions};
 use std::convert::TryInto;
 use std::error::Error;
 use std::fs::File;
@@ -14,6 +14,8 @@ use chacha20poly1305::aead::NewAead;
 use chacha20poly1305::{ChaCha20Poly1305, Key};
 
 mod chunks;
+use chunks::PortalChunks;
+
 mod file;
 
 // Allow users to access errors
@@ -51,9 +53,6 @@ pub struct Portal {
     // KeyExchange information
     exchange: PortalKeyExchange,
 
-    /// Metadata not sent until key is derived
-    metadata: Metadata,
-
     // Crypto state used to derive the key
     // once we receive a confirmation msg from the peer
     state: Option<Spake2<Ed25519Group>>,
@@ -74,13 +73,12 @@ impl Portal {
     /// // see the portal-client as an example of potential usage
     /// let id = String::from("my client ID");
     /// let password = String::from("testpasswd");
-    /// let portal = Portal::init(Direction::Receiver,id,password,None);
+    /// let portal = Portal::init(Direction::Receiver, id, password);
     /// ```
     pub fn init(
         direction: Direction,
         id: String,
         password: String,
-        mut filename: Option<String>,
     ) -> Result<Portal, Box<dyn Error>> {
         // hash the ID string
         let mut hasher = Sha256::new();
@@ -94,28 +92,11 @@ impl Portal {
             &Identity::new(&id_bytes),
         );
 
-        // If a file was provided, trim it to just the file name
-        if let Some(file) = filename {
-            let f = std::path::Path::new(&file);
-            let f = f
-                .file_name()
-                .ok_or(BadFileName)?
-                .to_str()
-                .ok_or(BadFileName)?;
-            filename = Some(f.to_string());
-        }
-
-        // Convert the filename to bytes
-        let metadata = Metadata {
-            filesize: 0,
-            filename: filename.map_or(None, |v| Some(v.as_bytes().to_vec())),
-        };
-
         Ok(Portal {
             direction,
             id: id_hash,
             exchange: outbound_msg.try_into().or(Err(CryptoError))?,
-            metadata,
+            //metadata,
             state: Some(s1),
             key: None,
         })
@@ -169,7 +150,7 @@ impl Portal {
     ///
     /// // Optional: implement a custom callback to display how much
     /// // has been transferred
-    /// fn progress(transferred: u64) {
+    /// fn progress(transferred: usize) {
     ///     println!("sent {:?} bytes", transferred);
     /// }
     ///
@@ -181,12 +162,52 @@ impl Portal {
         peer: &mut W,
         path: &str,
         callback: Option<D>,
-    ) -> Result<(), Box<dyn Error>>
+    ) -> Result<usize, Box<dyn Error>>
     where
         W: Write,
-        D: Fn(u64),
+        D: Fn(usize),
     {
-        unimplemented!()
+        // Check that the key exists to confirm the handshake is complete
+        let key = self.key.as_ref().ok_or(NoPeer)?;
+
+        // Obtain the file name stub from the path
+        let p = std::path::Path::new(path);
+        let filename = p
+            .file_name()
+            .ok_or(BadFileName)?
+            .to_str()
+            .ok_or(BadFileName)?;
+
+        // Map the file into memory
+        let mut mmap = self.map_readable_file(path)?;
+
+        // Create the metatada object
+        let metadata = Metadata {
+            filesize: mmap.len() as u64,
+            filename: filename.as_bytes().to_vec(),
+        };
+
+        // Write the file metadata over the encrypted channel
+        Protocol::write_encrypted_to(peer, key, &metadata)?;
+
+        // Encrypt the file in place & send the header
+        Protocol::write_encrypted_message_header(peer, key, &mut mmap[..])?;
+
+        // Establish an iterator over the encrypted region
+        let chunks = PortalChunks::init(&mmap[..], CHUNK_SIZE);
+
+        // Send the encrypted region in chunks
+        let mut total_sent = 0;
+        for chunk in chunks.into_iter() {
+            peer.write_all(chunk)?;
+
+            // Increment and optionally invoke callback
+            total_sent += chunk.len();
+            callback.as_ref().map(|c| {
+                c(total_sent);
+            });
+        }
+        Ok(total_sent)
     }
 
     /// Receive the next file over the portal. Must be called after performing
@@ -227,21 +248,15 @@ impl Portal {
         unimplemented!()
     }
 
-    /// mmap's a file into memory for reading
-    fn map_readable_file<'a>(&'a self, f: &str) -> Result<PortalFile, Box<dyn Error>> {
+    /// Helper: mmap's a file into memory for reading
+    fn map_readable_file<'a>(&'a self, f: &str) -> Result<MmapMut, Box<dyn Error>> {
         let file = File::open(f)?;
         let mmap = unsafe { MmapOptions::new().map_copy(&file)? };
-
-        let key = self.key.as_ref().ok_or(NoPeer)?;
-        let cha_key = Key::from_slice(&key[..]);
-
-        let cipher = ChaCha20Poly1305::new(cha_key);
-
-        Ok(PortalFile::init(mmap, cipher))
+        Ok(mmap)
     }
 
-    /// mmap's a file into memory for writing
-    fn map_writeable_file<'a>(&'a self, f: &str, size: u64) -> Result<PortalFile, Box<dyn Error>> {
+    /// Helper: mmap's a file into memory for writing
+    fn map_writeable_file<'a>(&'a self, f: &str, size: u64) -> Result<MmapMut, Box<dyn Error>> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -249,41 +264,34 @@ impl Portal {
             .open(&f)?;
 
         file.set_len(size)?;
-
-        let key = self.key.as_ref().ok_or(NoPeer)?;
-
         let mmap = unsafe { MmapOptions::new().map_mut(&file)? };
-
-        let cha_key = Key::from_slice(&key[..]);
-        let cipher = ChaCha20Poly1305::new(cha_key);
-
-        Ok(PortalFile::init(mmap, cipher))
+        Ok(mmap)
     }
 
-    /**
+    /*
      * Returns the file size associated with this request
-     */
+     *
     pub fn get_file_size(&self) -> u64 {
         self.metadata.filesize
     }
 
-    /**
+    /
      * Sets the file size associated with this request
-     */
+     *
     pub fn set_file_size(&mut self, size: u64) {
         self.metadata.filesize = size;
     }
 
-    /**
+    /
      * Returns the file name associated with this request
      * or a PortalError::NoneError if none exists
-     */
+     *
     pub fn get_file_name<'a>(&'a self) -> Result<&'a str, Box<dyn Error>> {
         match &self.metadata.filename {
             Some(f) => Ok(std::str::from_utf8(f)?),
             None => Err(NoneError.into()),
         }
-    }
+    } */
 
     /**
      * Returns a copy of the Portal::Direction associated with
