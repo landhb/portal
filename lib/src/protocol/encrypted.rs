@@ -24,11 +24,7 @@ pub struct EncryptedMessage {
 impl EncryptedMessage {
     /// Create an encrypted message out of an arbitrary serializable
     /// type
-    pub fn encrypt(
-        key: &[u8],
-        //object: S,
-        data: &mut [u8],
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn encrypt(key: &[u8], data: &mut [u8]) -> Result<Self, Box<dyn Error>> {
         // Init state to send
         let mut state = Self::default();
 
@@ -43,7 +39,6 @@ impl EncryptedMessage {
 
         // Set the length
         state.len = data.len();
-        //state.data = data; //bincode::serialize(&object)?;
 
         // Encrypt the data in-place
         let tag = match cipher.encrypt_in_place_detached(nonce, b"", data) {

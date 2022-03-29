@@ -244,6 +244,8 @@ impl Portal {
         // Receive the metadata
         let metadata: Metadata = Protocol::read_encrypted_from(peer, key)?;
 
+        println!("GOT METADATA");
+
         // Attempt to convert the filename to valid utf8
         let name = match std::str::from_utf8(&metadata.filename) {
             Ok(s) => s,
@@ -290,55 +292,25 @@ impl Portal {
         Ok(mmap)
     }
 
-    /**
-     * Returns a copy of the Portal::Direction associated with
-     * this Portal request
-     */
+    /// Returns a copy of the Portal::Direction associated with
+    /// this Portal request
     pub fn get_direction(&self) -> Direction {
         self.direction.clone()
     }
 
-    /**
-     * Sets the Portal::Direction associated with this Poral request
-     */
+    /// Sets the Portal::Direction associated with this Poral request
     pub fn set_direction(&mut self, direction: Direction) {
         self.direction = direction;
     }
 
-    /**
-     * Returns a reference to the ID associated with this
-     * Portal request
-     */
+    /// Returns a reference to the ID associated with this
+    /// Portal request
     pub fn get_id(&self) -> &String {
         &self.id
     }
 
-    /**
-     * Sets the ID associated with this Poral request
-     */
+    /// Sets the ID associated with this Poral request
     pub fn set_id(&mut self, id: String) {
         self.id = id;
     }
 }
-
-/*
-#[test]
-fn test_serialize_deserialize() {
-    let dir = Direction::Sender;
-    let pass = "test".to_string();
-    let (portal, _msg) = Portal::init(dir, "id".to_string(), pass, None);
-
-    let ser = portal.serialize().unwrap();
-    let res = Portal::parse(&ser).unwrap();
-
-    // fields that should be the same
-    assert_eq!(res.id, portal.id);
-    assert_eq!(res.direction, portal.direction);
-    assert_eq!(res.metadata.filename, portal.metadata.filename);
-    assert_eq!(res.metadata.filesize, portal.metadata.filesize);
-
-    // fields that shouldn't have been serialized
-    assert_ne!(res.state, portal.state);
-    assert_eq!(res.state, None);
-    assert_eq!(res.key, None);
-} */

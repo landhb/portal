@@ -32,10 +32,19 @@ impl Read for MockTcpStream {
         // Perform the read
         let res = self.readbuf.read(buf)?;
 
-        //println!("{:?} read {:?} bytes, left {:?}", self.id, res, self.waiting_for_write.load(Ordering::Relaxed));
+        /*println!(
+            "{:?} read {:?} bytes, left {:?}",
+            self.id,
+            res,
+            self.waiting_for_write.load(Ordering::Relaxed)
+        ); */
 
         // Subtract the amount read from the atomic
-        self.waiting_for_write.fetch_sub(res, Ordering::Relaxed);
+        if self.waiting_for_write.load(Ordering::Relaxed) > res {
+            self.waiting_for_write.fetch_sub(res, Ordering::SeqCst);
+        } else {
+            self.waiting_for_write.store(0, Ordering::SeqCst);
+        }
         Ok(res)
     }
 }
@@ -49,7 +58,7 @@ impl Write for MockTcpStream {
 
         // If they are blocked, signal that data is ready
         if self.write_done.load(Ordering::Relaxed) == 0 {
-            self.write_done.fetch_add(buf.len(), Ordering::Relaxed);
+            self.write_done.fetch_add(buf.len(), Ordering::SeqCst);
         }
 
         // Return the amount written
@@ -127,23 +136,54 @@ fn handshake_suceeds() {
 
     receiver.handshake(&mut receiverstream).unwrap();
     sender_thread.join().unwrap();
+}
 
-    // we need a key to be able to encrypt & decrypt
+#[test]
+fn test_file_roundtrip() {
+    let fsize = 1337;
+    let fname = "filename".to_string();
 
-    // Send metadata
-    //sender.write_metadata_to(&mut stream).unwrap();
+    // receiver
+    let dir = Direction::Receiver;
+    let pass = "test".to_string();
+    let mut receiver = Portal::init(dir, "id".to_string(), pass).unwrap();
 
-    // Recv metadata
-    //receiver.read_metadata_from(&mut stream).unwrap();
+    // sender
+    let dir = Direction::Sender;
+    let pass = "test".to_string();
+    let mut sender = Portal::init(dir, "id".to_string(), pass).unwrap();
 
-    /* Verify both peers now share the same metadata
-    assert_eq!(fsize, receiver.get_file_size());
-    assert_eq!(fname, receiver.get_file_name().unwrap());
-    assert_eq!(
-        sender.get_file_name().unwrap(),
-        receiver.get_file_name().unwrap()
-    );
-    assert_eq!(sender.get_file_size(), receiver.get_file_size()); */
+    // mock channel
+    let (mut senderstream, mut receiverstream) = MockTcpStream::channel();
+
+    let sender_thread = thread::spawn(move || {
+        // Complete handshake
+        sender.handshake(&mut senderstream).unwrap();
+
+        println!("COMPLETED HANDSHAKE");
+
+        // Send the file
+        let result = sender.send_file(&mut senderstream, "/tmp/passwd", None);
+        println!("FINISHED SENDING");
+        assert!(result.is_ok());
+        result.unwrap()
+    });
+
+    // Complete handshake
+    receiver.handshake(&mut receiverstream).unwrap();
+
+    //std::thread::sleep(std::time::Duration::new(5,0));
+
+    // Wait for sending to complete
+    let sent_size = sender_thread.join().unwrap();
+    println!("TOTAL SENT {:?}", sent_size);
+
+    // Receive the file
+    let metadata = receiver.recv_file(&mut receiverstream, None, None).unwrap();
+
+    // Compare sizes
+
+    assert_eq!(metadata.filesize, sent_size as u64);
 }
 
 #[test]
@@ -301,6 +341,7 @@ fn test_sync_file_download_file() {
     new_file.decrypt().unwrap(); // should not panic
     stream.flush().unwrap(); // just for coverage reporting, does nothing
 }
+
 
 #[test]
 fn test_encrypt_decrypt() {

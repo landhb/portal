@@ -1,4 +1,5 @@
 use super::{Direction, Protocol};
+use crate::protocol::{ConnectMessage, PortalMessage};
 use crate::tests::MockTcpStream;
 use crate::Portal;
 use hkdf::Hkdf;
@@ -157,4 +158,27 @@ fn test_key_confirmation() {
     // Assert key and confirm result are equal
     assert_eq!(rkey, skey);
     assert_eq!(sender_result, receiver_result);
+}
+
+#[test]
+fn test_serialize_deserialize_message() {
+    let values = ConnectMessage {
+        id: "id".to_string(),
+        direction: Direction::Sender,
+    };
+
+    let message = PortalMessage::Connect(values.clone());
+
+    let ser = bincode::serialize(&message).unwrap();
+    let res = PortalMessage::parse(&ser).unwrap();
+
+    // Retreive inner message
+    let res = match res {
+        PortalMessage::Connect(inner) => inner,
+        _ => panic!("Incorrect message type"),
+    };
+
+    // fields that should be the same
+    assert_eq!(res.id, values.id);
+    assert_eq!(res.direction, values.direction);
 }
