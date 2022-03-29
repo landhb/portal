@@ -1,5 +1,4 @@
 use crate::errors::PortalError::*;
-use crate::ProgressCallback;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::convert::TryInto;
 use std::error::Error;
@@ -209,14 +208,15 @@ impl Protocol {
     /// decrypted data into the provided storage region. This allows for
     /// the ability to receive an encrypted chunk and decrypt it entirely
     /// in-place without extra copies.
-    pub fn read_encrypted_zero_copy<R>(
+    pub fn read_encrypted_zero_copy<R, D>(
         reader: &mut R,
         key: &[u8],
         storage: &mut [u8],
-        callback: Option<ProgressCallback>,
+        callback: Option<D>,
     ) -> Result<usize, Box<dyn Error>>
     where
         R: Read,
+        D: Fn(usize),
     {
         // Receive the message header, return error if not EncryptedDataHeader
         let mut msg = match PortalMessage::recv(reader).or(Err(IOError))? {

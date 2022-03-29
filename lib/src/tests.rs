@@ -1,6 +1,7 @@
 //! Provides primary tests for the PortalFile abstraction
 //!
 use crate::{errors::PortalError, Direction, Portal};
+use crate::{NO_PROGRESS_CALLBACK, NO_VERIFY_CALLBACK};
 use mockstream::SyncMockStream;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -147,7 +148,7 @@ fn test_file_roundtrip() {
         sender.handshake(&mut senderstream).unwrap();
 
         // Send the file
-        let result = sender.send_file(&mut senderstream, &file_path_str, None);
+        let result = sender.send_file(&mut senderstream, &file_path_str, NO_PROGRESS_CALLBACK);
         assert!(result.is_ok());
         result.unwrap()
     });
@@ -157,7 +158,12 @@ fn test_file_roundtrip() {
 
     // Receive the file
     let metadata = receiver
-        .recv_file(&mut receiverstream, tmp_dir.path(), None, None)
+        .recv_file(
+            &mut receiverstream,
+            tmp_dir.path(),
+            NO_VERIFY_CALLBACK,
+            NO_PROGRESS_CALLBACK,
+        )
         .unwrap();
 
     // Wait for sending to complete
@@ -175,7 +181,7 @@ fn portal_send_file_no_peer() {
 
     // will return error
     let mut stream = SyncMockStream::new();
-    let result = portal.send_file(&mut stream, "/tmp/passwd", None::<fn(usize)>);
+    let result = portal.send_file(&mut stream, "/tmp/passwd", NO_PROGRESS_CALLBACK);
     assert!(result.is_err());
     assert_err!(
         result.err().unwrap().downcast_ref::<PortalError>(),
@@ -191,7 +197,12 @@ fn portal_recv_file_no_peer() {
 
     // will panic due to lack of peer
     let mut stream = SyncMockStream::new();
-    let result = portal.recv_file(&mut stream, Path::new("/tmp"), None, None);
+    let result = portal.recv_file(
+        &mut stream,
+        Path::new("/tmp"),
+        NO_VERIFY_CALLBACK,
+        NO_PROGRESS_CALLBACK,
+    );
     assert!(result.is_err());
     assert_err!(
         result.err().unwrap().downcast_ref::<PortalError>(),
@@ -226,7 +237,7 @@ fn test_recv_file_bad_outdir() {
         sender.handshake(&mut senderstream).unwrap();
 
         // Send the file
-        let result = sender.send_file(&mut senderstream, &file_path_str, None);
+        let result = sender.send_file(&mut senderstream, &file_path_str, NO_PROGRESS_CALLBACK);
         assert!(result.is_ok());
         result.unwrap()
     });
@@ -234,7 +245,12 @@ fn test_recv_file_bad_outdir() {
     // Complete handshake
     receiver.handshake(&mut receiverstream).unwrap();
 
-    let result = receiver.recv_file(&mut receiverstream, Path::new("/tmp/test.txt"), None, None);
+    let result = receiver.recv_file(
+        &mut receiverstream,
+        Path::new("/tmp/test.txt"),
+        NO_VERIFY_CALLBACK,
+        NO_PROGRESS_CALLBACK,
+    );
     assert!(result.is_err());
     assert_err!(
         result.err().unwrap().downcast_ref::<PortalError>(),
@@ -271,7 +287,7 @@ fn test_recv_file_cancel() {
         sender.handshake(&mut senderstream).unwrap();
 
         // Send the file
-        let result = sender.send_file(&mut senderstream, &file_path_str, None);
+        let result = sender.send_file(&mut senderstream, &file_path_str, NO_PROGRESS_CALLBACK);
         assert!(result.is_ok());
         result.unwrap()
     });
@@ -284,7 +300,12 @@ fn test_recv_file_cancel() {
         false
     }
 
-    let result = receiver.recv_file(&mut receiverstream, tmp_dir.path(), Some(cancel_all), None);
+    let result = receiver.recv_file(
+        &mut receiverstream,
+        tmp_dir.path(),
+        Some(cancel_all),
+        NO_PROGRESS_CALLBACK,
+    );
     assert!(result.is_err());
     assert_err!(
         result.err().unwrap().downcast_ref::<PortalError>(),

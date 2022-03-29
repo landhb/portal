@@ -23,7 +23,7 @@ use errors::PortalError::*;
 /// if the higher-level Portal interface is
 /// too abstract.
 pub mod protocol;
-use protocol::*;
+pub use protocol::*;
 
 /**
  * Arbitrary port for the Portal protocol
@@ -34,6 +34,12 @@ pub const DEFAULT_PORT: u16 = 13265;
  * Default chunk size
  */
 pub const CHUNK_SIZE: usize = 65536;
+
+/// None constant for optional verify callbacks - Helper
+pub const NO_VERIFY_CALLBACK: Option<fn(&str, u64) -> bool> = None::<fn(&str, u64) -> bool>;
+
+/// None constant for optional progress callbacks - Helper
+pub const NO_PROGRESS_CALLBACK: Option<fn(usize)> = None::<fn(usize)>;
 
 /**
  * The primary interface into the library.
@@ -55,9 +61,6 @@ pub struct Portal {
     // Derived session key
     key: Option<Vec<u8>>,
 }
-
-pub type VerifyCallback = fn(&str, u64) -> bool;
-pub type ProgressCallback = fn(usize);
 
 impl Portal {
     /// Initialize a new portal request
@@ -153,14 +156,15 @@ impl Portal {
     /// // Begin sending the file
     /// portal.send_file(&mut client, "/etc/passwd", Some(progress));
     /// ```
-    pub fn send_file<W>(
+    pub fn send_file<W, D>(
         &mut self,
         peer: &mut W,
         path: &str,
-        callback: Option<ProgressCallback>,
+        callback: Option<D>,
     ) -> Result<usize, Box<dyn Error>>
     where
         W: Write,
+        D: Fn(usize),
     {
         // Check that the key exists to confirm the handshake is complete
         let key = self.key.as_ref().ok_or(NoPeer)?;
@@ -229,15 +233,17 @@ impl Portal {
     /// // Begin receiving the file
     /// portal.recv_file(&mut client, Some(verify_callback), Some(display_callback));
     /// ```
-    pub fn recv_file<R>(
+    pub fn recv_file<R, V, D>(
         &mut self,
         peer: &mut R,
         outdir: &Path,
-        verify: Option<VerifyCallback>,
-        display: Option<ProgressCallback>,
+        verify: Option<V>,
+        display: Option<D>,
     ) -> Result<Metadata, Box<dyn Error>>
     where
         R: Read,
+        V: Fn(&str, u64) -> bool,
+        D: Fn(usize),
     {
         // Check that the key exists to confirm the handshake is complete
         let key = self.key.as_ref().ok_or(NoPeer)?;

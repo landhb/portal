@@ -6,11 +6,12 @@ use colored::*;
 use directories::UserDirs;
 use dns_lookup::lookup_host;
 use indicatif::{ProgressBar, ProgressStyle};
-use portal::{Portal, PortalConfirmation};
+use portal::{Direction, Portal};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::io::Write;
 use std::net::TcpStream;
+use std::path::Path;
 
 #[macro_use]
 extern crate lazy_static;
@@ -60,145 +61,62 @@ macro_rules! log_wait {
 
 fn transfer(
     mut portal: Portal,
-    msg: PortalConfirmation,
     fpath: &str,
     mut client: std::net::TcpStream,
-    is_reciever: bool,
 ) -> Result<(), Box<dyn Error>> {
-    /*
-     * Step 1: Portal Request
-     */
-    let req = portal.serialize()?;
-    client.write_all(&req)?;
-
-    /*
-     * Step 2: Portal Response/Acknowledgement of peering
-     *
-     * TODO: This step isn't strictly necessary anymore since
-     * file metadata is exchanged later. Requires relay changes
-     * to fully remove.
-     *
-     * Could potentially be used to exchange networking information
-     * for a P2P implementation?
-     */
-    log_status!("Waiting for peer to connect...");
-    match Portal::read_response_from(&mut client) {
-        Ok(_) => {}
-        Err(_e) => {
-            log_error!("No peer found. Try again.");
-            std::process::exit(0);
-        }
-    };
-
-    /*
-     * Step 3: PAKE2 msg exchange + key derivation
-     */
-    client.write_all(&msg)?;
-    let confirm_msg = Portal::read_confirmation_from(&mut client)?;
-    match portal.derive_key(&confirm_msg) {
-        Ok(_) => {}
-        Err(_) => {
-            log_error!("Incorrect channel ID or peer disconnected. Try again.");
-            std::process::exit(0);
-        }
-    }
-
-    /*
-     * Step 4: Key confirmation
-     */
-    match portal.confirm_peer(&mut client) {
-        Ok(_) => {
-            log_success!("Peer confirmed!");
-        }
-        Err(_) => {
-            log_error!("Incorrect pass-phrase or peer disconnected. Try again.");
-            std::process::exit(0);
-        }
-    }
-
-    /*
-     * Step 5: Begin file transfer
-     */
-    let mut total = 0;
     let pstyle = ProgressStyle::default_bar()
         .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
         .progress_chars("#>-");
 
-    match is_reciever {
-        true => {
-            // Receive metadata
-            portal.read_metadata_from(&mut client)?;
+    // Start the progress bar hidden
+    let pb = ProgressBar::hidden(); //new(fsize);
+    pb.set_style(pstyle);
 
-            let fname = format!("{}/{}", fpath, portal.get_file_name()?);
-            let fsize = portal.get_file_size();
-            log_status!("Downloading file: {:?}, size: {:?}", fname, fsize);
+    // User callback to display progress
+    let progress = |transferred: usize| {
+        pb.set_position(transferred as u64);
+    };
 
-            let pb = ProgressBar::new(fsize);
-            pb.set_style(pstyle);
+    match portal.get_direction() {
+        Direction::Receiver => {
+            // User callback to confirm/deny a transfer
+            let confirm_download = |_path: &str, size: u64| -> bool {
+                pb.set_length(size);
+                true
+            };
 
-            // create outfile
-            let mut file = portal.create_file(&fname, fsize)?;
-
-            // Receive until connection is done
-            log_status!("Waiting for peer to begin transfer...");
-            let len = match file.download_file(&client, |x| pb.set_position(x)) {
-                Ok(n) => n,
+            log_wait!("Awaiting peer...");
+            let metadata = match portal.recv_file(
+                &mut client,
+                Path::new(fpath),
+                Some(confirm_download),
+                Some(progress),
+            ) {
+                Ok(result) => result,
                 Err(e) => {
-                    log_error!("download failed: {:?}", e);
-                    std::process::exit(-1);
+                    log_error!("Failed to recv file.");
+                    return Err(e);
                 }
             };
 
-            // Verify received size
-            if len as u64 != fsize {
-                log_error!("peer disconnected or download did not complete");
-                std::process::exit(-1);
-            }
-
+            let fname = std::str::from_utf8(&metadata.filename).unwrap();
             pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
-
-            // Decrypt the file
-            log_wait!("Decrypting file...");
-            file.decrypt()?;
-            println!("{}", "Ok!".green());
         }
-        false => {
-            log_status!(
-                "Sending file: {:?}, size: {:?}",
-                portal.get_file_name().unwrap(),
-                portal.get_file_size()
-            );
+        Direction::Sender => {
+            // Obtain file size for progress bar
+            let metadata = std::fs::metadata(fpath)?;
+            pb.set_length(metadata.len());
 
-            let pb = ProgressBar::new(portal.get_file_size());
-            pb.set_style(pstyle);
-
-            // Send metadata
-            portal.write_metadata_to(&mut client)?;
-
-            // open file read-only for sending
-            let mut file = portal.load_file(fpath)?;
-
-            // Encrypt the file
-            log_wait!("Encrypting file...");
-            file.encrypt()?;
-            file.sync_file_state(&mut client)?;
-            println!("{}", "Ok!".green());
-
-            // iterate over the file in chunks, attempting to send
-            // each one
-            for data in file.get_chunks(portal::CHUNK_SIZE) {
-                match client.write_all(&data) {
-                    Ok(_) => {}
-                    Err(_) => {
-                        log_error!("peer disconnected or connection lost");
-                        std::process::exit(-1);
-                    }
+            log_wait!("Starting transfer...");
+            let sent = match portal.send_file(&mut client, fpath, Some(progress)) {
+                Ok(total) => total,
+                Err(e) => {
+                    log_error!("Failed to send file.");
+                    return Err(e);
                 }
-                total += portal::CHUNK_SIZE;
-                pb.set_position(total as u64);
-            }
+            };
 
-            pb.finish_with_message(format!("Sent {:?} bytes", total).as_str());
+            pb.finish_with_message(format!("Sent {:?} bytes", sent).as_str());
         }
     }
 
@@ -254,7 +172,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let addr: std::net::SocketAddr = format!("{}:{}", addr, cfg.relay_port).parse()?;
 
-    let client = match TcpStream::connect_timeout(&addr, std::time::Duration::new(3, 0)) {
+    let mut client = match TcpStream::connect_timeout(&addr, std::time::Duration::new(3, 0)) {
         Ok(res) => res,
         Err(e) => {
             log_error!("Failed to connect");
@@ -263,7 +181,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     log_success!("Connected to {:?}!", addr);
 
-    match matches.subcommand() {
+    let (direction, id, pass, path) = match matches.subcommand() {
         ("send", Some(args)) => {
             let id = gen_phrase(1);
             let pass = gen_phrase(3);
@@ -275,13 +193,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let file = args.value_of("filename").unwrap();
 
-            let (mut req, msg) =
-                Portal::init(portal::Direction::Sender, id, pass, Some(file.to_string()));
-
-            let metadata = std::fs::metadata(file)?;
-            req.set_file_size(metadata.len());
-
-            transfer(req, msg, file, client, false)?;
+            (Direction::Sender, id, pass, file.to_string())
         }
         ("recv", Some(args)) => {
             let pass = rpassword::read_password_from_tty(Some("Enter pass-phrase: ")).unwrap();
@@ -296,18 +208,36 @@ fn main() -> Result<(), Box<dyn Error>> {
             let id = pass.next().unwrap().to_string();
             let opass = pass.collect::<Vec<&str>>().join("-");
 
-            let (req, msg) = Portal::init(
-                portal::Direction::Receiver,
-                id,
-                opass,
-                None, // receiver will get the filename from the sender
-            );
-
-            transfer(req, msg, &cfg.download_location, client, true)?;
+            (Direction::Receiver, id, opass, cfg.download_location)
         }
         _ => {
-            println!("Please provide a valid subcommand. Run portal -h for more information.");
+            log_error!("Please provide a valid subcommand. Run portal -h for more information.");
+            std::process::exit(0);
         }
+    };
+
+    // Initialize portal
+    let mut portal = match Portal::init(direction, id, pass) {
+        Ok(res) => res,
+        Err(e) => {
+            log_error!("Failed to initialize portal");
+            return Err(e.into());
+        }
+    };
+
+    // Complete handshake
+    match portal.handshake(&mut client) {
+        Ok(_) => log_success!("Completed portal handshake with peer."),
+        x => {
+            log_error!("Failed to complete portal handshake. Verify client version & passphrase.");
+            return x;
+        }
+    }
+
+    // Begin transfer
+    match transfer(portal, &path, client) {
+        Ok(_) => log_success!("Complete!"),
+        Err(e) => log_error!("{:?}", e),
     }
 
     Ok(())
