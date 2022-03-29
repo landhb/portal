@@ -185,7 +185,7 @@ impl Protocol {
         Ok(())
     }
 
-    /// Read an encrypted message from the peer
+    /// Read an encrypted owned & deserialize-able object from the peer.
     pub fn read_encrypted_from<R, D>(
         &mut self,
         reader: &mut R,
@@ -195,14 +195,55 @@ impl Protocol {
         R: Read,
         D: DeserializeOwned,
     {
-        // Receive the message, return error if not encrypted
+        // Create temporary storage for the object
+        let mut storage = [0u8; 2048];
+
+        // Receive the message into the storage region
+        self.read_encrypted_zero_copy(reader, key, &mut storage)?;
+
+        // Deserialize the result
+        bincode::deserialize(&storage).or(Err(BadMsg.into()))
+    }
+
+    /// Read an encrypted message from the peer, writing the resulting
+    /// decrypted data into the provided storage region. This allows for
+    /// the ability to receive an encrypted chunk and decrypt it entirely
+    /// in-place without extra copies.
+    pub fn read_encrypted_zero_copy<R>(
+        &mut self,
+        reader: &mut R,
+        key: &[u8],
+        storage: &mut [u8],
+    ) -> Result<usize, Box<dyn Error>>
+    where
+        R: Read,
+    {
+        // Receive the message header, return error if not EncryptedData
         let mut msg = match PortalMessage::recv(reader).or(Err(IOError))? {
             PortalMessage::EncryptedData(inner) => inner,
             _ => return Err(BadMsg.into()),
         };
 
-        // Decrypt, deserialize, and return it
-        msg.decrypt_and_deserialize(key)
+        // Check that the storage region has enough room
+        if storage.len() < msg.len {
+            return Err(BufferTooSmall.into());
+        }
+
+        // Use the length field to read directly into the storage region
+        let mut pos = 0;
+        while pos < msg.len {
+            match reader.read(&mut storage[pos..msg.len]) {
+                Ok(0) => break,
+                Ok(len) => {
+                    pos += len;
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e.into()),
+            };
+        }
+
+        // Decrypt the region in-place
+        msg.decrypt_in_place(key, storage)
     }
 
     /// Write an encrypted message to the peer
@@ -216,8 +257,11 @@ impl Protocol {
         W: Write,
         S: Serialize,
     {
+        // Serialize the object
+        let mut data = bincode::serialize(msg)?;
+
         // Encrypt the data
-        let encmsg = EncryptedMessage::encrypt_and_serialize(key, msg)?;
+        let encmsg = EncryptedMessage::encrypt(key, &mut data)?;
 
         // Wrap and send the data
         PortalMessage::EncryptedData(encmsg).send(writer)

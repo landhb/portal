@@ -11,6 +11,8 @@ pub enum PortalError {
     CryptoError,
     #[error("Incorrect Mutability")]
     Mutability,
+    #[error("Provided storage is too small")]
+    BufferTooSmall,
     #[error("Bad registration")]
     BadRegistration,
     #[error("No state initialized")]

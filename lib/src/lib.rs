@@ -19,7 +19,9 @@ mod file;
 // Allow users to access errors
 pub mod errors;
 
-/// Lower level protocol methods
+/// Lower level protocol methods. Use these
+/// if the higher-level Portal interface is
+/// too abstract.
 pub mod protocol;
 use protocol::*;
 
@@ -37,9 +39,7 @@ pub const DEFAULT_PORT: u16 = 13265;
 pub const CHUNK_SIZE: usize = 65536;
 
 /**
- * The primary interface into the library. The Portal struct
- * contains data associated with either a new request or a response
- * from a peer.
+ * The primary interface into the library.
  */
 #[derive(PartialEq, Debug)]
 pub struct Portal {
@@ -169,7 +169,7 @@ impl Portal {
     ///
     /// // Optional: implement a custom callback to display how much
     /// // has been transferred
-    /// fn progress(transferred: usize) {
+    /// fn progress(transferred: u64) {
     ///     println!("sent {:?} bytes", transferred);
     /// }
     ///
@@ -202,11 +202,11 @@ impl Portal {
     /// // Optional: User callback to confirm/deny a transfer. If
     /// // none is provided, this will default accept the incoming file.
     /// // Return true to accept, false to reject the transfer.
-    /// fn confirm_download(path: &str, size: usize) -> bool { true }
+    /// fn confirm_download(path: &str, size: u64) -> bool { true }
     ///
     /// // Optional: implement a custom callback to display how much
     /// // has been transferred
-    /// fn progress(transferred: usize) {
+    /// fn progress(transferred: u64) {
     ///     println!("received {:?} bytes", transferred);
     /// }
     ///

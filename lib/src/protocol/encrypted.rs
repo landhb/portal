@@ -10,20 +10,24 @@ use chacha20poly1305::aead::NewAead;
 use chacha20poly1305::{aead::AeadInPlace, ChaCha20Poly1305, Key, Nonce, Tag};
 
 /// All encrypted messages must have associated state data (nonce, tag)
-/// as well as the data itself
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
 pub struct EncryptedMessage {
-    pub nonce: [u8; 12], //Nonce,
-    pub tag: [u8; 16],   //Tag,
-    pub data: Vec<u8>,
+    /// Provides storage for chacha20poly1305::Nonce
+    pub nonce: [u8; 12],
+    /// Provides storage for chacha20poly1305::Tag
+    pub tag: [u8; 16],
+    /// Length of follow-on data. Data is not owned
+    /// directly to prevent copies
+    pub len: usize,
 }
 
 impl EncryptedMessage {
     /// Create an encrypted message out of an arbitrary serializable
     /// type
-    pub fn encrypt_and_serialize<S: Serialize>(
+    pub fn encrypt(
         key: &[u8],
-        object: S,
+        //object: S,
+        data: &mut [u8],
     ) -> Result<Self, Box<dyn Error>> {
         // Init state to send
         let mut state = Self::default();
@@ -34,15 +38,15 @@ impl EncryptedMessage {
         let nonce = Nonce::from_slice(&state.nonce);
 
         // Obtain the cipher from the key
-        //let key = self.key.as_ref().ok_or(NoPeer)?;
         let cha_key = Key::from_slice(&key[..]);
         let cipher = ChaCha20Poly1305::new(cha_key);
 
-        // Serialize all the metadata
-        state.data = bincode::serialize(&object)?;
+        // Set the length
+        state.len = data.len();
+        //state.data = data; //bincode::serialize(&object)?;
 
-        // Encrypt the metadata in-place
-        let tag = match cipher.encrypt_in_place_detached(nonce, b"", &mut state.data) {
+        // Encrypt the data in-place
+        let tag = match cipher.encrypt_in_place_detached(nonce, b"", data) {
             Ok(tag) => tag,
             Err(_e) => return Err(EncryptError.into()),
         };
@@ -50,11 +54,25 @@ impl EncryptedMessage {
         Ok(state)
     }
 
-    /// Decrypt and deserialize the contained object from the data in this instance
+    /// Decrypt and deserialize into an object from the provided data
     pub fn decrypt_and_deserialize<D: DeserializeOwned + Sized>(
         &mut self,
         key: &[u8],
+        data: &mut [u8],
     ) -> Result<D, Box<dyn Error>> {
+        // Decrypt it in-place
+        self.decrypt_in_place(key, data)?;
+
+        // Return the deserialized & owned object
+        bincode::deserialize(data).or(Err(BadMsg.into()))
+    }
+
+    /// Decrypt the provided data in-place
+    pub fn decrypt_in_place(
+        &mut self,
+        key: &[u8],
+        data: &mut [u8],
+    ) -> Result<usize, Box<dyn Error>> {
         // Obtain the cipher from the key
         let cha_key = Key::from_slice(&key[..]);
         let cipher = ChaCha20Poly1305::new(cha_key);
@@ -64,12 +82,11 @@ impl EncryptedMessage {
         let tag = Tag::from_slice(&self.tag);
 
         // Decrypt the data in place
-        match cipher.decrypt_in_place_detached(&nonce, b"", &mut self.data, &tag) {
+        match cipher.decrypt_in_place_detached(&nonce, b"", data, &tag) {
             Ok(_) => {}
             Err(_e) => return Err(DecryptError.into()),
         }
 
-        // Return the deserialized object
-        bincode::deserialize(&self.data).or(Err(BadMsg.into()))
+        Ok(data.len())
     }
 }
