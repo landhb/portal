@@ -1,5 +1,5 @@
 use crate::errors::PortalError::*;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 
 // Nonce generation
@@ -54,25 +54,8 @@ impl EncryptedMessage {
         Ok(state)
     }
 
-    /// Decrypt and deserialize into an object from the provided data
-    pub fn decrypt_and_deserialize<D: DeserializeOwned + Sized>(
-        &mut self,
-        key: &[u8],
-        data: &mut [u8],
-    ) -> Result<D, Box<dyn Error>> {
-        // Decrypt it in-place
-        self.decrypt_in_place(key, data)?;
-
-        // Return the deserialized & owned object
-        bincode::deserialize(data).or(Err(BadMsg.into()))
-    }
-
     /// Decrypt the provided data in-place
-    pub fn decrypt_in_place(
-        &mut self,
-        key: &[u8],
-        data: &mut [u8],
-    ) -> Result<usize, Box<dyn Error>> {
+    pub fn decrypt(&mut self, key: &[u8], data: &mut [u8]) -> Result<usize, Box<dyn Error>> {
         // Obtain the cipher from the key
         let cha_key = Key::from_slice(&key[..]);
         let cipher = ChaCha20Poly1305::new(cha_key);

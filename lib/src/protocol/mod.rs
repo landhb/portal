@@ -246,7 +246,7 @@ impl Protocol {
         }
 
         // Decrypt the region in-place
-        msg.decrypt_in_place(key, storage)
+        msg.decrypt(key, storage)
     }
 
     /// Encrypt & send an EncryptedDataHeader + the entire object to the peer
