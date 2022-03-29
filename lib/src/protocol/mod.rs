@@ -1,4 +1,5 @@
 use crate::errors::PortalError::*;
+use crate::ProgressCallback;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::convert::TryInto;
 use std::error::Error;
@@ -16,6 +17,9 @@ pub use exchange::*;
 // Encrypted message types
 mod encrypted;
 pub use encrypted::*;
+
+#[cfg(test)]
+mod tests;
 
 /// Lower-level abstraction around the protocol. Use this
 /// directly if you'd like more control than what the
@@ -209,7 +213,7 @@ impl Protocol {
         reader: &mut R,
         key: &[u8],
         storage: &mut [u8],
-        callback: Option<fn(usize)>,
+        callback: Option<ProgressCallback>,
     ) -> Result<usize, Box<dyn Error>>
     where
         R: Read,
