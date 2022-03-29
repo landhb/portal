@@ -74,7 +74,7 @@ impl Portal {
     /// // see the portal-client as an example of potential usage
     /// let id = String::from("my client ID");
     /// let password = String::from("testpasswd");
-    /// let portal = Portal::init(Direction::Receiver, id, password);
+    /// let portal = Portal::init(Direction::Receiver, id, password)?;
     /// ```
     pub fn init(
         direction: Direction,
@@ -110,7 +110,7 @@ impl Portal {
     /// ```
     /// use std::net::TcpStream;
     ///
-    /// let portal = Portal::init(Direction::Sender,id,password,None);
+    /// let portal = Portal::init(Direction::Sender,id,password)?;
     /// let mut stream = TcpStream::connect("127.0.0.1:34254")?;
     ///
     /// // conduct the handshake with the peer
