@@ -135,10 +135,10 @@ impl Protocol {
     /// Use the derived session key to verify that our peer has derived
     /// the same key as us. After this the peer will be fully confirmed.
     pub fn confirm_peer<P: Read + Write>(
+        peer: &mut P,
         id: &str,
         direction: Direction,
         key: &[u8],
-        peer: &mut P,
     ) -> Result<(), Box<dyn Error>> {
         // Arbitrary info that both sides can derive
         let sender_info = format!("{}-{}", id, "senderinfo");

@@ -121,14 +121,13 @@ impl Portal {
 
         // after calling finish() the SPAKE2 struct will be consumed
         // so we must replace the value stored in self.state
-        let state = std::mem::replace(&mut self.state, None);
-        let state = state.ok_or(BadState)?;
+        let state = self.state.take().ok_or(BadState)?;
 
         // Derive the session key
         let key = Protocol::derive_key(state, &confirm).or(Err(BadMsg))?;
 
         // confirm that the peer has the same key
-        Protocol::confirm_peer(&self.id, self.direction, &key, peer)?;
+        Protocol::confirm_peer(peer, &self.id, self.direction, &key)?;
 
         // Set key for further use
         self.key = Some(key);
