@@ -7,6 +7,8 @@ pub enum PortalError {
     NoneError,
     #[error("Provided filename doesn't return a base filename")]
     BadFileName,
+    #[error("Provided outdir is not a directory")]
+    BadDirectory,
     #[error("Cancelled")]
     Cancelled,
     #[error("Incomplete")]

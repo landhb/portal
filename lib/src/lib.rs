@@ -1,9 +1,9 @@
 use memmap::{MmapMut, MmapOptions};
 use std::convert::TryInto;
 use std::error::Error;
-use std::fs::File;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
+use std::path::Path;
 
 // Key Exchange
 use sha2::{Digest, Sha256};
@@ -232,6 +232,7 @@ impl Portal {
     pub fn recv_file<R>(
         &mut self,
         peer: &mut R,
+        outdir: &Path,
         verify: Option<VerifyCallback>,
         display: Option<ProgressCallback>,
     ) -> Result<Metadata, Box<dyn Error>>
@@ -241,28 +242,34 @@ impl Portal {
         // Check that the key exists to confirm the handshake is complete
         let key = self.key.as_ref().ok_or(NoPeer)?;
 
+        // Verify the outdir is valid
+        if !outdir.is_dir() {
+            return Err(BadDirectory.into());
+        }
+
         // Receive the metadata
         let metadata: Metadata = Protocol::read_encrypted_from(peer, key)?;
 
-        println!("GOT METADATA");
-
         // Attempt to convert the filename to valid utf8
         let name = match std::str::from_utf8(&metadata.filename) {
-            Ok(s) => s,
-            _ => return Err(NoneError.into()),
+            Ok(s) => outdir.join(s),
+            _ => return Err(BadFileName.into()),
         };
+
+        // Convert the filename into a path
+        let path = name.to_str().ok_or(BadFileName)?;
 
         // Process the verify callback if applicable
         match verify
             .as_ref()
-            .map_or(true, |c| c(&name, metadata.filesize))
+            .map_or(true, |c| c(&path, metadata.filesize))
         {
             true => {}
             false => return Err(Cancelled.into()),
         }
 
         // Map the region into memory for writing
-        let mut mmap = self.map_writeable_file(&name, metadata.filesize)?;
+        let mut mmap = self.map_writeable_file(&path, metadata.filesize)?;
 
         // Receive and decrypt the file
         match Protocol::read_encrypted_zero_copy(peer, &key, &mut mmap[..], display)? {

@@ -2,19 +2,17 @@ use super::{Direction, Protocol};
 use crate::protocol::{ConnectMessage, PortalMessage};
 use crate::tests::MockTcpStream;
 use crate::Portal;
-use hkdf::Hkdf;
-use sha2::Sha256;
 use std::thread;
 
 #[test]
 fn test_connect() {
     // receiver
     let pass = "test".to_string();
-    let mut receiver = Portal::init(Direction::Receiver, "id".to_string(), pass).unwrap();
+    let receiver = Portal::init(Direction::Receiver, "id".to_string(), pass).unwrap();
 
     // sender
     let pass = "test".to_string();
-    let mut sender = Portal::init(Direction::Sender, "id".to_string(), pass).unwrap();
+    let sender = Portal::init(Direction::Sender, "id".to_string(), pass).unwrap();
 
     let (mut senderstream, mut receiverstream) = MockTcpStream::channel();
 
@@ -56,7 +54,6 @@ fn test_key_derivation() {
     let (mut senderstream, mut receiverstream) = MockTcpStream::channel();
 
     // Save sender.exchange before move
-    let senderexchange = sender.exchange.clone();
     let handle = thread::spawn(move || {
         let msg = Protocol::connect(
             &mut senderstream,
@@ -102,7 +99,6 @@ fn test_key_confirmation() {
     let (mut senderstream, mut receiverstream) = MockTcpStream::channel();
 
     // Save sender.exchange before move
-    let senderexchange = sender.exchange.clone();
     let handle = thread::spawn(move || {
         let msg = Protocol::connect(
             &mut senderstream,
