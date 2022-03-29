@@ -230,8 +230,8 @@ impl Portal {
     ///     println!("received {:?} bytes", transferred);
     /// }
     ///
-    /// // Begin receiving the file
-    /// portal.recv_file(&mut client, Some(verify_callback), Some(display_callback));
+    /// // Begin receiving the file into /tmp
+    /// portal.recv_file(&mut client, Path::new("/tmp"), Some(verify_callback), Some(display_callback));
     /// ```
     pub fn recv_file<R, V, D>(
         &mut self,
