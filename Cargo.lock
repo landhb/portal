@@ -1023,6 +1023,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mockstream"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35bbe0c0c9d254b463b13734bc361d1423289547e052b1e77e5a77292496ba2e"
+
+[[package]]
 name = "net2"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1185,6 +1191,7 @@ dependencies = [
  "hex",
  "hkdf 0.9.0",
  "memmap",
+ "mockstream",
  "rand 0.7.3",
  "serde",
  "sha2 0.9.9",
