@@ -7,6 +7,10 @@ pub enum PortalError {
     NoneError,
     #[error("Provided filename doesn't return a base filename")]
     BadFileName,
+    #[error("Cancelled")]
+    Cancelled,
+    #[error("Incomplete")]
+    Incomplete,
     #[error("Underlying crypto error")]
     CryptoError,
     #[error("Incorrect Mutability")]

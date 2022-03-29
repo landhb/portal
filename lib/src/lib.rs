@@ -9,26 +9,18 @@ use std::io::{Read, Write};
 use sha2::{Digest, Sha256};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 
-// File encryption
-use chacha20poly1305::aead::NewAead;
-use chacha20poly1305::{ChaCha20Poly1305, Key};
-
 mod chunks;
 use chunks::PortalChunks;
 
-mod file;
-
 // Allow users to access errors
 pub mod errors;
+use errors::PortalError::*;
 
 /// Lower level protocol methods. Use these
 /// if the higher-level Portal interface is
 /// too abstract.
 pub mod protocol;
 use protocol::*;
-
-use errors::PortalError::*;
-use file::PortalFile;
 
 /**
  * Arbitrary port for the Portal protocol
@@ -226,7 +218,7 @@ impl Portal {
     ///
     /// // Optional: implement a custom callback to display how much
     /// // has been transferred
-    /// fn progress(transferred: u64) {
+    /// fn progress(transferred: usize) {
     ///     println!("received {:?} bytes", transferred);
     /// }
     ///
@@ -237,14 +229,43 @@ impl Portal {
         &mut self,
         peer: &mut R,
         verify: Option<V>,
-        display: Option<D>,
-    ) -> Result<(), Box<dyn Error>>
+        display: Option<fn(usize)>,
+    ) -> Result<Metadata, Box<dyn Error>>
     where
         R: Read,
         V: Fn(&str, u64) -> bool,
-        D: Fn(u64),
+        D: Fn(usize),
     {
-        unimplemented!()
+        // Check that the key exists to confirm the handshake is complete
+        let key = self.key.as_ref().ok_or(NoPeer)?;
+
+        // Receive the metadata
+        let metadata: Metadata = Protocol::read_encrypted_from(peer, key)?;
+
+        // Attempt to convert the filename to valid utf8
+        let name = match std::str::from_utf8(&metadata.filename) {
+            Ok(s) => s,
+            _ => return Err(NoneError.into()),
+        };
+
+        // Process the verify callback if applicable
+        match verify
+            .as_ref()
+            .map_or(true, |c| c(&name, metadata.filesize))
+        {
+            true => {}
+            false => return Err(Cancelled.into()),
+        }
+
+        // Map the region into memory for writing
+        let mut mmap = self.map_writeable_file(&name, metadata.filesize)?;
+
+        // Receive and decrypt the file
+        match Protocol::read_encrypted_zero_copy(peer, &key, &mut mmap[..], display)? {
+            x if x == metadata.filesize as usize => {}
+            _ => return Err(Incomplete.into()),
+        }
+        Ok(metadata)
     }
 
     /// Helper: mmap's a file into memory for reading

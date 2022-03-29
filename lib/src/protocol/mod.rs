@@ -1,4 +1,3 @@
-use crate::chunks::PortalChunks;
 use crate::errors::PortalError::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::convert::TryInto;
@@ -196,7 +195,7 @@ impl Protocol {
         let mut storage = [0u8; 2048];
 
         // Receive the message into the storage region
-        Protocol::read_encrypted_zero_copy(reader, key, &mut storage)?;
+        Protocol::read_encrypted_zero_copy(reader, key, &mut storage, None::<fn(usize)>)?;
 
         // Deserialize the result
         bincode::deserialize(&storage).or(Err(BadMsg.into()))
@@ -210,6 +209,7 @@ impl Protocol {
         reader: &mut R,
         key: &[u8],
         storage: &mut [u8],
+        callback: Option<fn(usize)>,
     ) -> Result<usize, Box<dyn Error>>
     where
         R: Read,
@@ -232,6 +232,9 @@ impl Protocol {
                 Ok(0) => break,
                 Ok(len) => {
                     pos += len;
+                    callback.as_ref().map(|c| {
+                        c(pos);
+                    })
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e.into()),
