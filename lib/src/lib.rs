@@ -74,7 +74,7 @@ impl Portal {
     /// // see the portal-client as an example of potential usage
     /// let id = String::from("my client ID");
     /// let password = String::from("testpasswd");
-    /// let portal = Portal::init(Direction::Receiver, id, password)?;
+    /// let portal = Portal::init(Direction::Receiver, id, password).unwrap();
     /// ```
     pub fn init(
         direction: Direction,
@@ -107,11 +107,12 @@ impl Portal {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use std::net::TcpStream;
+    /// use portal_lib::{Portal,Direction};
     ///
-    /// let portal = Portal::init(Direction::Sender,id,password)?;
-    /// let mut stream = TcpStream::connect("127.0.0.1:34254")?;
+    /// let mut portal = Portal::init(Direction::Sender, "id".into(), "password".into()).unwrap();
+    /// let mut stream = TcpStream::connect("127.0.0.1:34254").unwrap();
     ///
     /// // conduct the handshake with the peer
     /// portal.handshake(&mut stream).unwrap();
@@ -142,10 +143,16 @@ impl Portal {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
+    /// use std::net::TcpStream;
+    /// use portal_lib::{Portal,Direction};
+    ///
+    /// let mut portal = Portal::init(Direction::Sender,"id".into(), "password".into()).unwrap();
+    /// let mut stream = TcpStream::connect("127.0.0.1:34254").unwrap();
+    ///
     /// // The handshake must be performed first, otherwise
     /// // there is no shared key to encrypt the file with
-    /// portal.handshake(&mut client);
+    /// portal.handshake(&mut stream);
     ///
     /// // Optional: implement a custom callback to display how much
     /// // has been transferred
@@ -154,7 +161,7 @@ impl Portal {
     /// }
     ///
     /// // Begin sending the file
-    /// portal.send_file(&mut client, "/etc/passwd", Some(progress));
+    /// portal.send_file(&mut stream, "/etc/passwd", Some(progress));
     /// ```
     pub fn send_file<W, D>(
         &mut self,
@@ -214,10 +221,17 @@ impl Portal {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
+    /// use std::path::Path;
+    /// use std::net::TcpStream;
+    /// use portal_lib::{Portal,Direction};
+    ///
+    /// let mut portal = Portal::init(Direction::Sender,"id".into(), "password".into()).unwrap();
+    /// let mut stream = TcpStream::connect("127.0.0.1:34254").unwrap();
+    ///
     /// // The handshake must be performed first, otherwise
     /// // there is no shared key to encrypt the file with
-    /// portal.handshake(&mut client);
+    /// portal.handshake(&mut stream);
     ///
     /// // Optional: User callback to confirm/deny a transfer. If
     /// // none is provided, this will default accept the incoming file.
@@ -231,7 +245,7 @@ impl Portal {
     /// }
     ///
     /// // Begin receiving the file into /tmp
-    /// portal.recv_file(&mut client, Path::new("/tmp"), Some(verify_callback), Some(display_callback));
+    /// portal.recv_file(&mut stream, Path::new("/tmp"), Some(confirm_download), Some(progress));
     /// ```
     pub fn recv_file<R, V, D>(
         &mut self,
