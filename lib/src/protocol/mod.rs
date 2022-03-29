@@ -242,8 +242,8 @@ impl Protocol {
         msg.decrypt_in_place(key, storage)
     }
 
-    /// Encrypt & send an entire object to the peer
-    pub fn write_encrypted_to<W, S>(
+    /// Encrypt & send an EncryptedDataHeader + the entire object to the peer
+    pub fn encrypt_and_write_object<W, S>(
         writer: &mut W,
         key: &[u8],
         msg: &S,
@@ -268,7 +268,7 @@ impl Protocol {
     }
 
     /// Encrypt & send the EncryptedDataHeader to the peer
-    pub fn write_encrypted_message_header<W>(
+    pub fn encrypt_and_write_header_only<W>(
         writer: &mut W,
         key: &[u8],
         data: &mut [u8],

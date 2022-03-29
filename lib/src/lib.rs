@@ -96,7 +96,6 @@ impl Portal {
             direction,
             id: id_hash,
             exchange: outbound_msg.try_into().or(Err(CryptoError))?,
-            //metadata,
             state: Some(s1),
             key: None,
         })
@@ -188,10 +187,10 @@ impl Portal {
         };
 
         // Write the file metadata over the encrypted channel
-        Protocol::write_encrypted_to(peer, key, &metadata)?;
+        Protocol::encrypt_and_write_object(peer, key, &metadata)?;
 
-        // Encrypt the file in place & send the header
-        Protocol::write_encrypted_message_header(peer, key, &mut mmap[..])?;
+        // Encrypt the file in-place & send the header
+        Protocol::encrypt_and_write_header_only(peer, key, &mut mmap[..])?;
 
         // Establish an iterator over the encrypted region
         let chunks = PortalChunks::init(&mmap[..], CHUNK_SIZE);
@@ -267,31 +266,6 @@ impl Portal {
         let mmap = unsafe { MmapOptions::new().map_mut(&file)? };
         Ok(mmap)
     }
-
-    /*
-     * Returns the file size associated with this request
-     *
-    pub fn get_file_size(&self) -> u64 {
-        self.metadata.filesize
-    }
-
-    /
-     * Sets the file size associated with this request
-     *
-    pub fn set_file_size(&mut self, size: u64) {
-        self.metadata.filesize = size;
-    }
-
-    /
-     * Returns the file name associated with this request
-     * or a PortalError::NoneError if none exists
-     *
-    pub fn get_file_name<'a>(&'a self) -> Result<&'a str, Box<dyn Error>> {
-        match &self.metadata.filename {
-            Some(f) => Ok(std::str::from_utf8(f)?),
-            None => Err(NoneError.into()),
-        }
-    } */
 
     /**
      * Returns a copy of the Portal::Direction associated with
