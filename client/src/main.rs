@@ -9,7 +9,6 @@ use indicatif::{ProgressBar, ProgressStyle};
 use portal::{Direction, Portal};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use std::io::Write;
 use std::net::TcpStream;
 use std::path::Path;
 
@@ -54,10 +53,10 @@ macro_rules! log_error {
 macro_rules! log_success {
     ($($arg:tt)*) => (println!("{} {}", "[+]".green().bold(), format_args!($($arg)*)));
 }
-
+/*
 macro_rules! log_wait {
     ($($arg:tt)*) => (print!("{} {}", "[...]".yellow().bold(), format_args!($($arg)*)); std::io::stdout().flush().unwrap(););
-}
+}*/
 
 fn transfer(
     mut portal: Portal,
@@ -69,7 +68,7 @@ fn transfer(
         .progress_chars("#>-");
 
     // Start the progress bar hidden
-    let pb = ProgressBar::hidden(); //new(fsize);
+    let pb = ProgressBar::new(0); //new(fsize);
     pb.set_style(pstyle);
 
     // User callback to display progress
@@ -80,12 +79,13 @@ fn transfer(
     match portal.get_direction() {
         Direction::Receiver => {
             // User callback to confirm/deny a transfer
-            let confirm_download = |_path: &str, size: u64| -> bool {
+            let confirm_download = |path: &str, size: u64| -> bool {
+                log_status!("Downloading file: {:?}, size: {:?}", path, size);
                 pb.set_length(size);
                 true
             };
 
-            log_wait!("Awaiting peer...");
+            log_status!("Waiting for peer to begin transfer...");
             let metadata = match portal.recv_file(
                 &mut client,
                 Path::new(fpath),
@@ -103,11 +103,11 @@ fn transfer(
             pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
         }
         Direction::Sender => {
+            log_status!("Starting transfer...");
+
             // Obtain file size for progress bar
             let metadata = std::fs::metadata(fpath)?;
             pb.set_length(metadata.len());
-
-            log_wait!("Starting transfer...");
             let sent = match portal.send_file(&mut client, fpath, Some(progress)) {
                 Ok(total) => total,
                 Err(e) => {

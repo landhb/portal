@@ -48,15 +48,15 @@ pub const NO_PROGRESS_CALLBACK: Option<fn(usize)> = None::<fn(usize)>;
 pub struct Portal {
     // Information to correlate
     // connections on the relay
-    id: String,
-    direction: Direction,
+    pub id: String,
+    pub direction: Direction,
 
     // KeyExchange information
-    exchange: PortalKeyExchange,
+    pub exchange: PortalKeyExchange,
 
     // Crypto state used to derive the key
     // once we receive a confirmation msg from the peer
-    state: Option<Spake2<Ed25519Group>>,
+    pub state: Option<Spake2<Ed25519Group>>,
 
     // Derived session key
     key: Option<Vec<u8>>,
@@ -325,5 +325,16 @@ impl Portal {
     /// Sets the ID associated with this Poral request
     pub fn set_id(&mut self, id: String) {
         self.id = id;
+    }
+
+    /// Returns a reference to the key associated with this
+    /// Portal request
+    pub fn get_key(&self) -> &Option<Vec<u8>> {
+        &self.key
+    }
+
+    /// Sets the ID associated with this Poral request
+    pub fn set_key(&mut self, key: Vec<u8>) {
+        self.key = Some(key);
     }
 }

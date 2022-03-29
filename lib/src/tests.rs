@@ -344,4 +344,8 @@ fn test_getters_setters() {
     // get/set direction
     portal.set_direction(Direction::Receiver);
     assert_eq!(portal.get_direction(), Direction::Receiver);
+
+    // get/set key
+    portal.set_key(vec![0, 1, 2, 3]);
+    assert_eq!(&Some(vec![0, 1, 2, 3]), portal.get_key());
 }
