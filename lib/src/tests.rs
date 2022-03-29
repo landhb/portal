@@ -1,10 +1,8 @@
 //! Provides primary tests for the PortalFile abstraction
 //!
-use crate::{errors::PortalError, Direction, Portal, ProgressCallback, VerifyCallback};
-use hkdf::Hkdf;
+use crate::{errors::PortalError, Direction, Portal};
 use mockstream::SyncMockStream;
 use rand::Rng;
-use sha2::Sha256;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
@@ -24,7 +22,7 @@ impl Read for MockTcpStream {
         // Blocking read, wait until data is available
         let mut count = 0;
         while self.waiting_for_write.load(Ordering::Relaxed) == 0 {
-            if count > 10 {
+            if count > 20 {
                 break;
             }
             count += 1;

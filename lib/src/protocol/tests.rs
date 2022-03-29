@@ -102,7 +102,6 @@ fn test_key_confirmation() {
 
     // Save sender.exchange before move
     let senderexchange = sender.exchange.clone();
-    let mut origsenderstream = senderstream.clone();
     let handle = thread::spawn(move || {
         let msg = Protocol::connect(
             &mut senderstream,
