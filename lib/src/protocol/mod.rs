@@ -94,12 +94,14 @@ impl Protocol {
         direction: Direction,
         msg: PortalKeyExchange,
     ) -> Result<PortalKeyExchange, Box<dyn Error>> {
-        // Send the connect message.
-        let _ = PortalMessage::Connect(ConnectMessage {
+        // Initial connect message
+        let c = ConnectMessage {
             id: id.to_owned(),
             direction,
-        })
-        .send(peer)?;
+        };
+
+        // Send the connect message.
+        PortalMessage::Connect(c).send(peer)?;
 
         // Recv the peer's equivalent peering/connect message
         // TODO: currently nothing is done with this, however
@@ -107,7 +109,7 @@ impl Protocol {
         let _info = PortalMessage::recv(peer)?;
 
         // Send the exchange data
-        let _ = PortalMessage::KeyExchange(msg).send(peer)?;
+        PortalMessage::KeyExchange(msg).send(peer)?;
 
         // Recv the peer's data
         match PortalMessage::recv(peer).or(Err(IOError))? {
@@ -123,12 +125,7 @@ impl Protocol {
         state: Spake2<Ed25519Group>,
         peer_data: &PortalKeyExchange,
     ) -> Result<Vec<u8>, Box<dyn Error>> {
-        match state.finish(peer_data.into()) {
-            Ok(res) => Ok(res),
-            Err(_) => {
-                return Err(BadMsg.into());
-            }
-        }
+        state.finish(peer_data.into()).or(Err(BadMsg.into()))
     }
 
     /// Use the derived session key to verify that our peer has derived
@@ -145,7 +142,6 @@ impl Protocol {
 
         // Perform key confirmation step via HKDF
         let h = Hkdf::<Sha256>::new(None, key);
-        let mut peer_msg = [0u8; 42];
         let mut sender_confirm = [0u8; 42];
         let mut receiver_confirm = [0u8; 42];
         h.expand(&sender_info.as_bytes(), &mut sender_confirm)
@@ -159,28 +155,20 @@ impl Protocol {
             Direction::Receiver => (receiver_confirm, sender_confirm),
         };
 
+        // The result we'll expect
+        let expected = PortalConfirmation { 0: expected };
+
         // Send our data
-        peer.write_all(&to_send)?;
+        PortalMessage::Confirm(PortalConfirmation { 0: to_send }).send(peer)?;
 
         // Receive the peer's version
-        peer.read_exact(&mut peer_msg)?;
-
-        /// Helper method to compair arbitrary &[u8] slices, used internally
-        /// to compare key confirmation data
-        fn compare_key_derivations(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
-            for (ai, bi) in a.iter().zip(b.iter()) {
-                match ai.cmp(&bi) {
-                    std::cmp::Ordering::Equal => continue,
-                    ord => return ord,
-                }
-            }
-
-            // if every single element was equal, compare length
-            a.len().cmp(&b.len())
-        }
+        let peer_msg = match PortalMessage::recv(peer)? {
+            PortalMessage::Confirm(inner) => inner,
+            _ => return Err(BadMsg.into()),
+        };
 
         // Compare their version to the expected result
-        if compare_key_derivations(&peer_msg, &expected) != std::cmp::Ordering::Equal {
+        if peer_msg != expected {
             return Err(BadMsg.into());
         }
 

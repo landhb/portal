@@ -13,7 +13,7 @@ pub struct PortalKeyExchange([u8; 33]);
 /// A data format exchanged by each peer to confirm
 /// that they have each derived the same key
 #[derive(PartialEq, Debug, Copy, Clone)]
-pub struct PortalConfirmation([u8; 42]);
+pub struct PortalConfirmation(pub [u8; 42]);
 
 /// Provide a serde visitor to serialize/deserialize larger arrays
 struct ArrayVisitor<T> {
@@ -69,12 +69,6 @@ impl Serialize for PortalKeyExchange {
             seq.serialize_element(elem)?;
         }
         seq.end()
-    }
-}
-
-impl From<[u8; 33]> for PortalKeyExchange {
-    fn from(s: [u8; 33]) -> Self {
-        PortalKeyExchange { 0: s }
     }
 }
 

@@ -41,10 +41,11 @@ impl EncryptedMessage {
         state.len = data.len();
 
         // Encrypt the data in-place
-        let tag = match cipher.encrypt_in_place_detached(nonce, b"", data) {
-            Ok(tag) => tag,
-            Err(_e) => return Err(EncryptError.into()),
-        };
+        let tag = cipher
+            .encrypt_in_place_detached(nonce, b"", data)
+            .or(Err(EncryptError))?;
+
+        // Save the tag in our current state
         state.tag = tag.into();
         Ok(state)
     }
@@ -60,10 +61,9 @@ impl EncryptedMessage {
         let tag = Tag::from_slice(&self.tag);
 
         // Decrypt the data in place
-        match cipher.decrypt_in_place_detached(&nonce, b"", data, &tag) {
-            Ok(_) => {}
-            Err(_e) => return Err(DecryptError.into()),
-        }
+        cipher
+            .decrypt_in_place_detached(&nonce, b"", data, &tag)
+            .or(Err(DecryptError))?;
 
         Ok(data.len())
     }
