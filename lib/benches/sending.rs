@@ -99,6 +99,17 @@ fn bench_file_sender(c: &mut Criterion) {
         })
     });
 
+    //500M
+    let path = create_file(&tmp_dir, 500_000_000);
+    group.bench_function("encrypt & send 500M", |b| {
+        b.iter(|| {
+            let total_size = sender
+                .send_file(&mut stream, &path, NO_PROGRESS_CALLBACK)
+                .unwrap();
+            assert!(total_size >= 500_000_000);
+        })
+    });
+
     group.finish();
 }
 

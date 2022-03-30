@@ -53,10 +53,6 @@ macro_rules! log_error {
 macro_rules! log_success {
     ($($arg:tt)*) => (println!("{} {}", "[+]".green().bold(), format_args!($($arg)*)));
 }
-/*
-macro_rules! log_wait {
-    ($($arg:tt)*) => (print!("{} {}", "[...]".yellow().bold(), format_args!($($arg)*)); std::io::stdout().flush().unwrap(););
-}*/
 
 fn transfer(
     mut portal: Portal,

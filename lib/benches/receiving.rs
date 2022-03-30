@@ -1,5 +1,6 @@
 extern crate portal_lib as portal;
 use criterion::{criterion_group, criterion_main, Criterion};
+use mockstream::MockStream;
 use portal::{protocol::Protocol, Direction, Portal};
 use portal::{NO_PROGRESS_CALLBACK, NO_VERIFY_CALLBACK};
 use std::fs::File;
@@ -7,26 +8,20 @@ use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 use tempdir::TempDir;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct MockTcpStream {
-    pub data: Vec<u8>,
+    pub inner: MockStream,
 }
 
 impl Read for MockTcpStream {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, std::io::Error> {
-        let size: usize = std::cmp::min(self.data.len(), buf.len());
-        if size == 0 {
-            return Ok(size);
-        }
-        buf[..size].copy_from_slice(&self.data[..size]);
-        self.data.drain(0..size);
-        Ok(size)
+        self.inner.read(buf)
     }
 }
 
 impl Write for MockTcpStream {
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-        self.data.extend_from_slice(buf);
+        self.inner.push_bytes_to_read(buf);
         Ok(buf.len())
     }
 
@@ -79,7 +74,7 @@ fn send_file(sender: &mut Portal, stream: &mut MockTcpStream, dir: &TempDir, siz
 fn bench_file_receiver(c: &mut Criterion) {
     // Fake TCP stream
     let mut stream = MockTcpStream {
-        data: Vec::with_capacity(100_000),
+        inner: MockStream::new(),
     };
 
     // Init receiver
@@ -184,6 +179,37 @@ fn bench_file_receiver(c: &mut Criterion) {
                 // End timing
                 total_time += start.elapsed();
                 assert_eq!(metatada.filesize, 100_000_000);
+            }
+            total_time
+        })
+    });
+
+    // 500M
+    send_file(&mut sender, &mut stream, &tmp_dir, 500_000_000);
+    let backup = stream.clone();
+    group.bench_function("receive & decrypt 500M", |b| {
+        b.iter_custom(|iters| {
+            let mut total_time = Duration::ZERO;
+            for _i in 0..iters {
+                // Each iteration must have a new stream to consume
+                stream = backup.clone();
+
+                // Begin timing after the setup is done
+                let start = Instant::now();
+
+                // use download_file to read in the file data
+                let metatada = receiver
+                    .recv_file(
+                        &mut stream,
+                        out_dir.path(),
+                        NO_VERIFY_CALLBACK,
+                        NO_PROGRESS_CALLBACK,
+                    )
+                    .unwrap();
+
+                // End timing
+                total_time += start.elapsed();
+                assert_eq!(metatada.filesize, 500_000_000);
             }
             total_time
         })
