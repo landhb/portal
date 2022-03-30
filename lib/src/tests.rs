@@ -192,7 +192,7 @@ fn portal_handshake_no_peer() {
     let mut stream = SyncMockStream::new();
 
     // Queue a message that will make Protocol::connect() mad
-    let mut values = EncryptedMessage::default();
+    let values = EncryptedMessage::default();
     let message = PortalMessage::EncryptedDataHeader(values);
     stream.push_bytes_to_read(&bincode::serialize(&message).unwrap());
 

@@ -190,14 +190,17 @@ impl Portal {
             filename: filename.as_bytes().to_vec(),
         };
 
+        // Create a nonce sequence to prevent re-use
+        let mut nseq = NonceSequence::new();
+
         // Write the file metadata over the encrypted channel
-        Protocol::encrypt_and_write_object(peer, key, &metadata)?;
+        Protocol::encrypt_and_write_object(peer, key, &mut nseq, &metadata)?;
 
         // Send the encrypted region in chunks
         let mut total_sent = 0;
         for chunk in mmap[..].chunks_mut(CHUNK_SIZE) {
             // Encrypt the chunk in-place & send the header
-            Protocol::encrypt_and_write_header_only(peer, key, chunk)?;
+            Protocol::encrypt_and_write_header_only(peer, key, &mut nseq, chunk)?;
 
             // Write the entire chunk
             peer.write_all(chunk)?;

@@ -1,5 +1,6 @@
 use crate::errors::PortalError::*;
 use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 use std::error::Error;
 
 // Nonce generation
@@ -12,16 +13,22 @@ use chacha20poly1305::{aead::AeadInPlace, aead::NewAead, ChaCha20Poly1305, Key, 
 #[cfg(feature = "ring-backend")]
 use ring::aead::{Aad, LessSafeKey, Nonce, Tag, UnboundKey, CHACHA20_POLY1305};
 
-#[cfg(feature = "ring-backend")]
-use std::convert::TryInto;
+/// We store 128bits but only need 96bit nonces
+const NONCE_SIZE: usize = 12;
+const TAG_SIZE: usize = 16;
+
+/// An abstraction around a nonce sequence. Safely
+/// ensures there is no nonce re-use during a session
+/// with a single key.
+pub struct NonceSequence([u8; TAG_SIZE]);
 
 /// All encrypted messages must have associated state data (nonce, tag)
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
 pub struct EncryptedMessage {
     /// Provides storage for chacha20poly1305::Nonce
-    pub nonce: [u8; 12],
+    pub nonce: [u8; NONCE_SIZE],
     /// Provides storage for chacha20poly1305::Tag
-    pub tag: [u8; 16],
+    pub tag: [u8; TAG_SIZE],
     /// Length of follow-on data. Data is not owned
     /// directly to prevent copies
     pub len: usize,
@@ -31,13 +38,16 @@ pub struct EncryptedMessage {
 impl EncryptedMessage {
     /// Create an encrypted message out of an arbitrary serializable
     /// type
-    pub fn encrypt(key: &[u8], data: &mut [u8]) -> Result<Self, Box<dyn Error>> {
+    pub fn encrypt(
+        key: &[u8],
+        nseq: &mut NonceSequence,
+        data: &mut [u8],
+    ) -> Result<Self, Box<dyn Error>> {
         // Init state to send
         let mut state = Self::default();
 
-        // Generate random nonce
-        let mut rng = rand::thread_rng();
-        state.nonce = rng.gen::<[u8; 12]>();
+        // Obtain the next nonce
+        state.nonce = nseq.next()?;
         let nonce = Nonce::from_slice(&state.nonce);
 
         // Obtain the cipher from the key
@@ -80,7 +90,11 @@ impl EncryptedMessage {
 impl EncryptedMessage {
     /// Create an encrypted message out of an arbitrary serializable
     /// type
-    pub fn encrypt(key: &[u8], data: &mut [u8]) -> Result<Self, Box<dyn Error>> {
+    pub fn encrypt(
+        key: &[u8],
+        nseq: &mut NonceSequence,
+        data: &mut [u8],
+    ) -> Result<Self, Box<dyn Error>> {
         // Init state to send
         let mut state = Self::default();
 
@@ -88,9 +102,8 @@ impl EncryptedMessage {
         let ring_key_chacha20 =
             LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, key).or(Err(CryptoError))?);
 
-        // Generate random nonce
-        let mut rng = rand::thread_rng();
-        state.nonce = rng.gen::<[u8; 12]>();
+        // Obtain the next nonce
+        state.nonce = nseq.next()?;
         let ring_nonce = Nonce::assume_unique_for_key(state.nonce);
 
         // Set the length
@@ -122,5 +135,29 @@ impl EncryptedMessage {
             .or(Err(DecryptError))?;
 
         Ok(data.len())
+    }
+}
+
+impl NonceSequence {
+    /// Initialize the sequence by generating a random 128bit nonce
+    pub fn new() -> Self {
+        let mut rng = rand::thread_rng();
+        Self {
+            0: rng.gen::<[u8; 16]>(),
+        }
+    }
+
+    /// Advance the sequence by incrementing the internal state
+    /// and returning the current state. Similar nonces in TLS 1.3
+    pub fn next(&mut self) -> Result<[u8; NONCE_SIZE], Box<dyn Error>> {
+        // Save the old value
+        let old = self.0;
+
+        // Increment & store the new value
+        let new = u128::from_le_bytes(self.0) + 1;
+        self.0 = new.to_le_bytes();
+
+        // Return the old value as a nonce
+        old[..NONCE_SIZE].try_into().or(Err(CryptoError.into()))
     }
 }

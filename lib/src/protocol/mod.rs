@@ -236,6 +236,7 @@ impl Protocol {
     pub fn encrypt_and_write_object<W, S>(
         writer: &mut W,
         key: &[u8],
+        nseq: &mut NonceSequence,
         msg: &S,
     ) -> Result<usize, Box<dyn Error>>
     where
@@ -246,7 +247,7 @@ impl Protocol {
         let mut data = bincode::serialize(msg)?;
 
         // Encrypt the data
-        let encmsg = EncryptedMessage::encrypt(key, &mut data)?;
+        let encmsg = EncryptedMessage::encrypt(key, nseq, &mut data)?;
 
         // Wrap and send the header
         PortalMessage::EncryptedDataHeader(encmsg).send(writer)?;
@@ -261,13 +262,14 @@ impl Protocol {
     pub fn encrypt_and_write_header_only<W>(
         writer: &mut W,
         key: &[u8],
+        nseq: &mut NonceSequence,
         data: &mut [u8],
     ) -> Result<usize, Box<dyn Error>>
     where
         W: Write,
     {
         // Encrypt the entire region in-place
-        let header = EncryptedMessage::encrypt(key, data)?;
+        let header = EncryptedMessage::encrypt(key, nseq, data)?;
 
         // Send the EncryptedMessage header
         PortalMessage::EncryptedDataHeader(header).send(writer)
