@@ -169,7 +169,7 @@ impl Protocol {
 
         // Compare their version to the expected result
         if peer_msg != expected {
-            return Err(BadMsg.into());
+            return Err(PeerKeyMismatch.into());
         }
 
         // If they match, the peer is confirmed

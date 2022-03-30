@@ -316,10 +316,61 @@ fn test_recv_file_cancel() {
 }
 
 #[test]
-fn test_incomplete_transfer() {}
+fn test_display_callback() {
+    // Create test file
+    let tmp_dir = TempDir::new("test_display_callback").unwrap();
+    let file_path = tmp_dir.path().join("randomfile.txt");
+    let file_path_str = file_path.to_str().unwrap().to_owned();
+    let mut tmp_file = File::create(file_path).unwrap();
+    writeln!(tmp_file, "Test File").unwrap();
+    let file_size = tmp_file.metadata().unwrap().len();
 
-#[test]
-fn test_failed_decryption() {}
+    // receiver
+    let dir = Direction::Receiver;
+    let pass = "test".to_string();
+    let mut receiver = Portal::init(dir, "id".to_string(), pass).unwrap();
+
+    // sender
+    let dir = Direction::Sender;
+    let pass = "test".to_string();
+    let mut sender = Portal::init(dir, "id".to_string(), pass).unwrap();
+
+    // mock channel
+    let (mut senderstream, mut receiverstream) = MockTcpStream::channel();
+
+    // Display callback
+    let progress = move |size: usize| {
+        assert!(size as u64 <= file_size);
+    };
+
+    // Verify callback
+    fn accept_all(_path: &str, _size: u64) -> bool {
+        true
+    }
+
+    let sender_thread = thread::spawn(move || {
+        // Complete handshake
+        sender.handshake(&mut senderstream).unwrap();
+
+        // Send the file
+        let result = sender.send_file(&mut senderstream, &file_path_str, Some(progress));
+        assert!(result.is_ok());
+        result.unwrap()
+    });
+
+    // Complete handshake
+    receiver.handshake(&mut receiverstream).unwrap();
+
+    // Receive the file
+    let result = receiver.recv_file(
+        &mut receiverstream,
+        tmp_dir.path(),
+        Some(accept_all),
+        Some(progress),
+    );
+
+    sender_thread.join().unwrap();
+}
 
 #[test]
 fn test_compressed_edwards_size() {

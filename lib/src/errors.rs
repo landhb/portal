@@ -1,7 +1,6 @@
-use std::io;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum PortalError {
     #[error("Value doesn't exist")]
     NoneError,
@@ -28,6 +27,8 @@ pub enum PortalError {
     #[error("KeyDerivationFailed")]
     BadMsg,
     #[error("EncryptError")]
+    PeerKeyMismatch,
+    #[error("EncryptError")]
     EncryptError,
     #[error("DecryptError")]
     DecryptError,
@@ -39,6 +40,4 @@ pub enum PortalError {
     WouldBlock,
     #[error("Object could not be serialized")]
     SerializeError,
-    #[error("Disconnected")]
-    Disconnect(#[from] io::Error),
 }

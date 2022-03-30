@@ -189,37 +189,6 @@ fn bench_file_receiver(c: &mut Criterion) {
         })
     });
 
-    // 500M
-    send_file(&mut sender, &mut stream, &tmp_dir, 500_000_000);
-    let backup = stream.clone();
-    group.bench_function("receive & decrypt 500M", |b| {
-        b.iter_custom(|iters| {
-            let mut total_time = Duration::ZERO;
-            for _i in 0..iters {
-                // Each iteration must have a new stream to consume
-                stream = backup.clone();
-
-                // Begin timing after the setup is done
-                let start = Instant::now();
-
-                // use download_file to read in the file data
-                let metatada = receiver
-                    .recv_file(
-                        &mut stream,
-                        out_dir.path(),
-                        NO_VERIFY_CALLBACK,
-                        NO_PROGRESS_CALLBACK,
-                    )
-                    .unwrap();
-
-                // End timing
-                total_time += start.elapsed();
-                assert_eq!(metatada.filesize, 500_000_000);
-            }
-            total_time
-        })
-    });
-
     group.finish();
 }
 
