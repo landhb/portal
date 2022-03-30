@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "portal-client"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-std",
@@ -1183,7 +1183,7 @@ dependencies = [
 
 [[package]]
 name = "portal-lib"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bincode",
  "chacha20poly1305",
@@ -1203,7 +1203,7 @@ dependencies = [
 
 [[package]]
 name = "portal-relay"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "daemonize",

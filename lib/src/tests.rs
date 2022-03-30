@@ -1,5 +1,6 @@
 //! Provides primary tests for the PortalFile abstraction
 //!
+use crate::protocol::{EncryptedMessage, PortalMessage};
 use crate::{errors::PortalError, Direction, Portal};
 use crate::{NO_PROGRESS_CALLBACK, NO_VERIFY_CALLBACK};
 use mockstream::SyncMockStream;
@@ -171,6 +172,36 @@ fn test_file_roundtrip() {
 
     // Compare sizes
     assert_eq!(metadata.filesize, sent_size as u64);
+}
+
+#[test]
+fn portal_map_bad_path() {
+    let dir = Direction::Receiver;
+    let pass = "test".to_string();
+    let receiver = Portal::init(dir, "id".to_string(), pass).unwrap();
+    let result = receiver.map_writeable_file("/notafile", 12);
+    assert!(result.is_err());
+}
+
+#[test]
+fn portal_handshake_no_peer() {
+    let dir = Direction::Receiver;
+    let pass = "test".to_string();
+    let mut receiver = Portal::init(dir, "id".to_string(), pass).unwrap();
+
+    let mut stream = SyncMockStream::new();
+
+    // Queue a message that will make Protocol::connect() mad
+    let mut values = EncryptedMessage::default();
+    let message = PortalMessage::EncryptedDataHeader(values);
+    stream.push_bytes_to_read(&bincode::serialize(&message).unwrap());
+
+    let result = receiver.handshake(&mut stream);
+    assert!(result.is_err());
+    assert_err!(
+        result.err().unwrap().downcast_ref::<PortalError>(),
+        Some(PortalError::NoPeer)
+    );
 }
 
 #[test]
@@ -362,7 +393,7 @@ fn test_display_callback() {
     receiver.handshake(&mut receiverstream).unwrap();
 
     // Receive the file
-    let result = receiver.recv_file(
+    let _result = receiver.recv_file(
         &mut receiverstream,
         tmp_dir.path(),
         Some(accept_all),
