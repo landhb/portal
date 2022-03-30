@@ -12,9 +12,6 @@ use spake2::{Ed25519Group, Identity, Password, Spake2};
 #[cfg(test)]
 mod tests;
 
-mod chunks;
-use chunks::PortalChunks;
-
 // Allow users to access errors
 pub mod errors;
 use errors::PortalError::*;
@@ -196,15 +193,13 @@ impl Portal {
         // Write the file metadata over the encrypted channel
         Protocol::encrypt_and_write_object(peer, key, &metadata)?;
 
-        // Encrypt the file in-place & send the header
-        Protocol::encrypt_and_write_header_only(peer, key, &mut mmap[..])?;
-
-        // Establish an iterator over the encrypted region
-        let chunks = PortalChunks::init(&mmap[..], CHUNK_SIZE);
-
         // Send the encrypted region in chunks
         let mut total_sent = 0;
-        for chunk in chunks.into_iter() {
+        for chunk in mmap[..].chunks_mut(CHUNK_SIZE) {
+            // Encrypt the chunk in-place & send the header
+            Protocol::encrypt_and_write_header_only(peer, key, chunk)?;
+
+            // Write the entire chunk
             peer.write_all(chunk)?;
 
             // Increment and optionally invoke callback
@@ -291,10 +286,21 @@ impl Portal {
         // Map the region into memory for writing
         let mut mmap = self.map_writeable_file(&path, metadata.filesize)?;
 
-        // Receive and decrypt the file
-        match Protocol::read_encrypted_zero_copy(peer, &key, &mut mmap[..], display)? {
-            x if x == metadata.filesize as usize => {}
-            _ => return Err(Incomplete.into()),
+        let mut total = 0;
+        for chunk in mmap[..].chunks_mut(CHUNK_SIZE) {
+            // Receive the entire chunk in-place
+            Protocol::read_encrypted_zero_copy(peer, &key, chunk)?;
+
+            // Increment and optionally invoke callback
+            total += chunk.len();
+            display.as_ref().map(|c| {
+                c(total);
+            });
+        }
+
+        // Check for incomplete transfers
+        if total != metadata.filesize as usize {
+            return Err(Incomplete.into());
         }
         Ok(metadata)
     }

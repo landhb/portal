@@ -186,7 +186,7 @@ impl Protocol {
         let mut storage = [0u8; 2048];
 
         // Receive the message into the storage region
-        Protocol::read_encrypted_zero_copy(reader, key, &mut storage, None::<fn(usize)>)?;
+        Protocol::read_encrypted_zero_copy(reader, key, &mut storage)?;
 
         // Deserialize the result
         bincode::deserialize(&storage).or(Err(BadMsg.into()))
@@ -196,15 +196,13 @@ impl Protocol {
     /// decrypted data into the provided storage region. This allows for
     /// the ability to receive an encrypted chunk and decrypt it entirely
     /// in-place without extra copies.
-    pub fn read_encrypted_zero_copy<R, D>(
+    pub fn read_encrypted_zero_copy<R>(
         reader: &mut R,
         key: &[u8],
         storage: &mut [u8],
-        callback: Option<D>,
     ) -> Result<usize, Box<dyn Error>>
     where
         R: Read,
-        D: Fn(usize),
     {
         // Receive the message header, return error if not EncryptedDataHeader
         let mut msg = match PortalMessage::recv(reader).or(Err(IOError))? {
@@ -224,9 +222,6 @@ impl Protocol {
                 Ok(0) => break,
                 Ok(len) => {
                     pos += len;
-                    callback.as_ref().map(|c| {
-                        c(pos);
-                    })
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e.into()),
