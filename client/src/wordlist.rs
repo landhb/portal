@@ -5,7 +5,7 @@ use std::collections::HashMap;
  * Generates a pass-phrase with the EFF's dice generated
  * word list
  *
- * https://www.eff.org/dice
+ * <https://www.eff.org/dice>
  */
 pub fn gen_phrase(count: usize) -> String {
     let mut phrase = vec![];

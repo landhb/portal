@@ -1,31 +1,27 @@
 extern crate portal_lib as portal;
 use criterion::{criterion_group, criterion_main, Criterion};
-use portal::{Direction, Portal};
+use mockstream::MockStream;
+use portal::{protocol::Protocol, Direction, Portal};
+use portal::{NO_PROGRESS_CALLBACK, NO_VERIFY_CALLBACK};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 use tempdir::TempDir;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct MockTcpStream {
-    pub data: Vec<u8>,
+    pub inner: MockStream,
 }
 
 impl Read for MockTcpStream {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, std::io::Error> {
-        let size: usize = std::cmp::min(self.data.len(), buf.len());
-        if size == 0 {
-            return Ok(size);
-        }
-        buf[..size].copy_from_slice(&self.data[..size]);
-        self.data.drain(0..size);
-        Ok(size)
+        self.inner.read(buf)
     }
 }
 
 impl Write for MockTcpStream {
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-        self.data.extend_from_slice(buf);
+        self.inner.push_bytes_to_read(buf);
         Ok(buf.len())
     }
 
@@ -39,16 +35,20 @@ fn setup() -> (Portal, Portal) {
     // receiver
     let dir = Direction::Receiver;
     let pass = "test".to_string();
-    let (mut receiver, receiver_msg) = Portal::init(dir, "id".to_string(), pass, None);
+    let mut receiver = Portal::init(dir, "id".to_string(), pass).unwrap();
 
     // sender
     let dir = Direction::Sender;
     let pass = "test".to_string();
-    let (mut sender, sender_msg) = Portal::init(dir, "id".to_string(), pass, None);
+    let mut sender = Portal::init(dir, "id".to_string(), pass).unwrap();
 
-    // we need a key to be able to encrypt
-    receiver.derive_key(sender_msg.as_slice()).unwrap();
-    sender.derive_key(receiver_msg.as_slice()).unwrap();
+    // Get a key
+    let state = sender.state.take().unwrap();
+    let key = Protocol::derive_key(state, &receiver.exchange).unwrap();
+
+    // Give each side the key
+    sender.set_key(key.clone());
+    receiver.set_key(key);
 
     (sender, receiver)
 }
@@ -64,32 +64,25 @@ fn send_file(sender: &mut Portal, stream: &mut MockTcpStream, dir: &TempDir, siz
     // Set the file size
     tmp_file.set_len(size).unwrap();
 
-    // encrypt the file
-    let mut file = sender.load_file(&file_path_str).unwrap();
-    file.encrypt().unwrap();
-
-    // communicate the necessary state info
-    // for the peer to be able to decrypt the file
-    file.sync_file_state(stream).unwrap();
-
-    // send the file over the stream
-    for data in file.get_chunks(portal::CHUNK_SIZE) {
-        stream.write(&data).unwrap();
-    }
+    // encrypt & send the file
+    let total_size = sender
+        .send_file(stream, &file_path_str, NO_PROGRESS_CALLBACK)
+        .unwrap();
+    assert_eq!(total_size, size as usize);
 }
 
 fn bench_file_receiver(c: &mut Criterion) {
     // Fake TCP stream
     let mut stream = MockTcpStream {
-        data: Vec::with_capacity(100_000),
+        inner: MockStream::new(),
     };
 
     // Init receiver
-    let (mut sender, receiver) = setup();
+    let (mut sender, mut receiver) = setup();
 
     // Create test directory
     let tmp_dir = TempDir::new("sending").unwrap();
-    let results_path = tmp_dir.path().join("results.raw");
+    let out_dir = TempDir::new("receiving").unwrap();
 
     // Benchmark creating the file and downloading the data
     // + the decryption. 100k
@@ -106,16 +99,18 @@ fn bench_file_receiver(c: &mut Criterion) {
                 let start = Instant::now();
 
                 // use download_file to read in the file data
-                let mut new_file = receiver
-                    .create_file(results_path.to_str().unwrap(), 100_000)
+                let metatada = receiver
+                    .recv_file(
+                        &mut stream,
+                        out_dir.path(),
+                        NO_VERIFY_CALLBACK,
+                        NO_PROGRESS_CALLBACK,
+                    )
                     .unwrap();
-
-                new_file.download_file(&mut stream, |_x| {}).unwrap();
-
-                new_file.decrypt().unwrap(); // should not panic
 
                 // End timing
                 total_time += start.elapsed();
+                assert_eq!(metatada.filesize, 100_000);
             }
             total_time
         })
@@ -135,16 +130,18 @@ fn bench_file_receiver(c: &mut Criterion) {
                 let start = Instant::now();
 
                 // use download_file to read in the file data
-                let mut new_file = receiver
-                    .create_file(results_path.to_str().unwrap(), 1_000_000)
+                let metatada = receiver
+                    .recv_file(
+                        &mut stream,
+                        out_dir.path(),
+                        NO_VERIFY_CALLBACK,
+                        NO_PROGRESS_CALLBACK,
+                    )
                     .unwrap();
-
-                new_file.download_file(&mut stream, |_x| {}).unwrap();
-
-                new_file.decrypt().unwrap(); // should not panic
 
                 // End timing
                 total_time += start.elapsed();
+                assert_eq!(metatada.filesize, 1_000_000);
             }
             total_time
         })
@@ -170,16 +167,18 @@ fn bench_file_receiver(c: &mut Criterion) {
                 let start = Instant::now();
 
                 // use download_file to read in the file data
-                let mut new_file = receiver
-                    .create_file(results_path.to_str().unwrap(), 100_000_000)
+                let metatada = receiver
+                    .recv_file(
+                        &mut stream,
+                        out_dir.path(),
+                        NO_VERIFY_CALLBACK,
+                        NO_PROGRESS_CALLBACK,
+                    )
                     .unwrap();
-
-                new_file.download_file(&mut stream, |_x| {}).unwrap();
-
-                new_file.decrypt().unwrap(); // should not panic
 
                 // End timing
                 total_time += start.elapsed();
+                assert_eq!(metatada.filesize, 100_000_000);
             }
             total_time
         })
@@ -199,16 +198,18 @@ fn bench_file_receiver(c: &mut Criterion) {
                 let start = Instant::now();
 
                 // use download_file to read in the file data
-                let mut new_file = receiver
-                    .create_file(results_path.to_str().unwrap(), 500_000_000)
+                let metatada = receiver
+                    .recv_file(
+                        &mut stream,
+                        out_dir.path(),
+                        NO_VERIFY_CALLBACK,
+                        NO_PROGRESS_CALLBACK,
+                    )
                     .unwrap();
-
-                new_file.download_file(&mut stream, |_x| {}).unwrap();
-
-                new_file.decrypt().unwrap(); // should not panic
 
                 // End timing
                 total_time += start.elapsed();
+                assert_eq!(metatada.filesize, 500_000_000);
             }
             total_time
         })

@@ -1,12 +1,23 @@
-use std::io;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum PortalError {
     #[error("Value doesn't exist")]
     NoneError,
+    #[error("Provided filename doesn't return a base filename")]
+    BadFileName,
+    #[error("Provided outdir is not a directory")]
+    BadDirectory,
+    #[error("Cancelled")]
+    Cancelled,
+    #[error("Incomplete")]
+    Incomplete,
+    #[error("Underlying crypto error")]
+    CryptoError,
     #[error("Incorrect Mutability")]
     Mutability,
+    #[error("Provided storage is too small")]
+    BufferTooSmall,
     #[error("Bad registration")]
     BadRegistration,
     #[error("No state initialized")]
@@ -15,6 +26,8 @@ pub enum PortalError {
     NoPeer,
     #[error("KeyDerivationFailed")]
     BadMsg,
+    #[error("EncryptError")]
+    PeerKeyMismatch,
     #[error("EncryptError")]
     EncryptError,
     #[error("DecryptError")]
@@ -25,6 +38,6 @@ pub enum PortalError {
     Interrupted,
     #[error("WouldBlock")]
     WouldBlock,
-    #[error("Disconnected")]
-    Disconnect(#[from] io::Error),
+    #[error("Object could not be serialized")]
+    SerializeError,
 }
