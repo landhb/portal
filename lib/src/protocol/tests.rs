@@ -1,11 +1,24 @@
 use super::{Direction, Protocol};
 use crate::errors::PortalError;
-use crate::protocol::{ConnectMessage, EncryptedMessage, PortalConfirmation, PortalMessage};
+use crate::protocol::{
+    ConnectMessage, EncryptedMessage, NonceSequence, PortalConfirmation, PortalMessage,
+};
 use crate::tests::MockTcpStream;
 use crate::Portal;
 use mockstream::SyncMockStream;
 use std::convert::TryInto;
 use std::thread;
+
+#[test]
+fn test_nonce() {
+    let mut n = NonceSequence::new();
+    let mut old = [0u8; 12];
+    for _ in 0..2_000_000 {
+        let new = n.next().unwrap();
+        assert!(new != old);
+        old = new;
+    }
+}
 
 #[test]
 fn test_connect() {

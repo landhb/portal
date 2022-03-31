@@ -154,8 +154,8 @@ impl NonceSequence {
         let old = self.0;
 
         // Increment & store the new value
-        let new = u128::from_le_bytes(self.0) + 1;
-        self.0 = new.to_le_bytes();
+        let new = u128::from_be_bytes(self.0).wrapping_shr(32);
+        self.0 = new.wrapping_add(1).wrapping_shl(32).to_be_bytes();
 
         // Return the old value as a nonce
         old[..NONCE_SIZE].try_into().or(Err(CryptoError.into()))
