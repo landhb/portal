@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1648478327074,
+  "lastUpdate": 1648686604823,
   "repoUrl": "https://github.com/landhb/portal",
   "entries": {
     "Mainline Benchmark Tracker": [
@@ -431,6 +431,78 @@ window.BENCHMARK_DATA = {
             "name": "larger-files/encrypt & send 500M",
             "value": 1630301206,
             "range": "± 7512332",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "12598313+landhb@users.noreply.github.com",
+            "name": "Bradley Landherr",
+            "username": "landhb"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6775febfcca390f542774cd366e172937b703bab",
+          "message": "Refactor API + Implement Chunking + Ring Backend Support (#11)\n\n* Upgrade deps, remove anyhow\r\n* Refactor API into higher and lower level abstractions\r\n* Update docs\r\n* Improve MockTcpStream for both unit tests and benchmarks\r\n* Update relay & client to use newer API\r\n* Convert benchmarks to use equivalent API\r\n* Implement chunking and optional ring backend.\r\n* Bump version numbers to 0.4.0\r\n* Introduce NonceSequence abstraction to safely increment nonces for each call to encrypt(). Needed for chunking.\r\n\r\nCo-authored-by: landhb <landhb@users.noreply.github.com>",
+          "timestamp": "2022-03-30T20:09:46-04:00",
+          "tree_id": "5daa28ac0c591cada7068719bf5ddf94a07c09a0",
+          "url": "https://github.com/landhb/portal/commit/6775febfcca390f542774cd366e172937b703bab"
+        },
+        "date": 1648686604369,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "receive & decrypt 100k",
+            "value": 119690,
+            "range": "± 714",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "receive & decrypt 1M",
+            "value": 1022106,
+            "range": "± 3582",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "larger-files/receive & decrypt 100M",
+            "value": 118520487,
+            "range": "± 49039036",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "larger-files/receive & decrypt 500M",
+            "value": 1240862553,
+            "range": "± 116010814",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "encrypt & send 100k",
+            "value": 159126,
+            "range": "± 420",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "encrypt & send 1M",
+            "value": 1486720,
+            "range": "± 8216",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "larger-files/encrypt & send 100M",
+            "value": 151244026,
+            "range": "± 504367",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "larger-files/encrypt & send 500M",
+            "value": 750466833,
+            "range": "± 734171",
             "unit": "ns/iter"
           }
         ]
