@@ -3,91 +3,155 @@ extern crate portal_lib as portal;
 use anyhow::Result;
 use clap::{App, AppSettings, Arg, SubCommand};
 use colored::*;
-use directories::UserDirs;
 use dns_lookup::lookup_host;
-use indicatif::{ProgressBar, ProgressStyle};
-use portal::{Direction, Portal};
-use serde::{Deserialize, Serialize};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use portal::{errors::PortalError, protocol::Metadata, Direction, Portal, TransferInfo};
 use std::error::Error;
 use std::net::TcpStream;
 use std::path::Path;
+use std::sync::Arc;
 
 #[macro_use]
 extern crate lazy_static;
 
+#[macro_use]
+mod macros;
+mod config;
+use config::AppConfig;
+
 mod wordlist;
 use wordlist::gen_phrase;
 
-#[derive(Serialize, Deserialize, Debug)]
-struct AppConfig {
-    relay_host: String,
-    relay_port: u16,
-    download_location: String,
-}
+lazy_static! {
+    /// Global multi-bar that contains other progress bars
+    pub static ref PROGRESS_BAR: Arc<MultiProgress> = Arc::new(
+        MultiProgress::with_draw_target(ProgressDrawTarget::stdout())
+    );
 
-impl ::std::default::Default for AppConfig {
-    fn default() -> Self {
-        // select ~/Downloads or /tmp for downloads
-        let hdir = UserDirs::new();
-        let ddir = match &hdir {
-            Some(home) => home.download_dir().map_or("/tmp", |v| v.to_str().unwrap()),
-            None => "/tmp",
-        };
-
-        Self {
-            relay_host: String::from("portal-relay.landhb.dev"),
-            relay_port: portal::DEFAULT_PORT,
-            download_location: String::from(ddir),
-        }
-    }
-}
-
-macro_rules! log_status {
-    ($($arg:tt)*) => (println!("{} {}", "[*]".blue().bold(), format_args!($($arg)*)));
-}
-
-macro_rules! log_error {
-    ($($arg:tt)*) => (println!("{} {}", "[!]".red().bold(), format_args!($($arg)*)));
-}
-
-macro_rules! log_success {
-    ($($arg:tt)*) => (println!("{} {}", "[+]".green().bold(), format_args!($($arg)*)));
-}
-
-fn transfer(
-    mut portal: Portal,
-    fpath: &str,
-    mut client: std::net::TcpStream,
-) -> Result<(), Box<dyn Error>> {
-    let pstyle = ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+    /// All bars have the same style
+    pub static ref PSTYLE: ProgressStyle = ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}")
         .progress_chars("#>-");
+}
 
-    // Start the progress bar hidden
-    let pb = ProgressBar::new(0); //new(fsize);
-    pb.set_style(pstyle);
+/// As the sender, a pass-phrase muse be created to deliver
+/// out-of-band (in secret) to the receiver.
+fn create_password() -> (String, String) {
+    let id = gen_phrase(1);
+    let pass = gen_phrase(3);
+    log_success!(
+        "Tell your peer their pass-phrase is: {:?}",
+        format!("{}-{}", id, pass)
+    );
+    (id, pass)
+}
 
-    // User callback to display progress
-    let progress = |transferred: usize| {
-        pb.set_position(transferred as u64);
+/// The receiver must prompt the user for the pass-phrase
+/// Splits the input and returns a tuple (id, password)
+fn prompt_password() -> Result<(String, String), Box<dyn Error>> {
+    let input = rpassword::prompt_password("Enter pass-phrase: ")?;
+    let mut input = input.split('-');
+    let id = input.next().unwrap().to_string();
+    let opass = input.collect::<Vec<&str>>().join("-");
+    Ok((id, opass))
+}
+
+/// Send a file
+fn send_file(
+    portal: &mut Portal,
+    client: &mut TcpStream,
+    fpath: &str,
+) -> Result<(), Box<dyn Error>> {
+    log_status!("Starting transfer...");
+
+    // Obtain file size for the progress bar
+    let metadata = std::fs::metadata(fpath)?;
+
+    // TODO make this a builder pattern
+    // with .add_file() and add_directory()
+    let info = TransferInfo {
+        all: vec![Metadata {
+            filesize: metadata.len(),
+            filename: Path::new(fpath)
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string(),
+        }],
     };
 
-    match portal.get_direction() {
-        Direction::Receiver => {
-            // User callback to confirm/deny a transfer
-            let confirm_download = |path: &str, size: u64| -> bool {
-                log_status!("Downloading file: {:?}, size: {:?}", path, size);
-                pb.set_length(size);
-                true
-            };
+    for file in portal.outgoing(client, info)? {
+        // Start the progress bar
+        let pb = PROGRESS_BAR.add(ProgressBar::new(file.filesize));
+        pb.set_style(PSTYLE.clone());
 
-            log_status!("Waiting for peer to begin transfer...");
-            let metadata = match portal.recv_file(
-                &mut client,
-                Path::new(fpath),
-                Some(confirm_download),
-                Some(progress),
-            ) {
+        // Required to render
+        pb.tick();
+
+        // Set filename as the message
+        pb.set_message(file.filename.clone());
+
+        // User callback to display progress
+        let progress = |transferred: usize| {
+            pb.set_position(transferred as u64);
+        };
+
+        // Begin the transfer
+        let sent = match portal.send_file(client, fpath, Some(progress)) {
+            Ok(total) => total,
+            Err(e) => {
+                log_error!("Failed to send file.");
+                return Err(e);
+            }
+        };
+
+        pb.finish();
+    }
+
+    Ok(())
+}
+
+/// Recv a file
+fn recv_all(
+    portal: &mut Portal,
+    client: &mut TcpStream,
+    download_directory: &str,
+) -> Result<(), Box<dyn Error>> {
+    log_status!("Waiting for peer to begin transfer...");
+
+    // User callback to confirm/deny a transfer
+    let confirm_download = |info: &TransferInfo| -> bool {
+        for file in info.all.iter() {
+            log_status!(
+                "Incoming file: {:?}, size: {:?}",
+                file.filename,
+                file.filesize
+            );
+        }
+        let ans = rpassword::prompt_password("Download the file(s)? [y/N]: ").unwrap();
+        true
+    };
+
+    // For each file create a new progress bar
+    for file in portal.incoming(client, Some(confirm_download))? {
+        // Create a new bar
+        let pb = PROGRESS_BAR.add(ProgressBar::new(file.filesize));
+        pb.set_style(PSTYLE.clone());
+
+        // Required to render
+        pb.tick();
+
+        // Set filename as the message
+        pb.set_message(file.filename.clone());
+
+        // User callback to display progress
+        let progress = |transferred: usize| {
+            pb.set_position(transferred as u64);
+        };
+
+        let metadata =
+            match portal.recv_file(client, Path::new(download_directory), &file, Some(progress)) {
                 Ok(result) => result,
                 Err(e) => {
                     log_error!("Failed to recv file.");
@@ -95,26 +159,22 @@ fn transfer(
                 }
             };
 
-            let fname = std::str::from_utf8(&metadata.filename).unwrap();
-            pb.finish_with_message(format!("Downloaded {:?}", fname).as_str());
+        pb.finish();
+    }
+
+    Ok(())
+}
+
+/// Transfer
+fn transfer(mut portal: Portal, fpath: &str, mut client: TcpStream) -> Result<(), Box<dyn Error>> {
+    let msg = match portal.get_direction() {
+        Direction::Receiver => {
+            recv_all(&mut portal, &mut client, fpath)?;
         }
         Direction::Sender => {
-            log_status!("Starting transfer...");
-
-            // Obtain file size for progress bar
-            let metadata = std::fs::metadata(fpath)?;
-            pb.set_length(metadata.len());
-            let sent = match portal.send_file(&mut client, fpath, Some(progress)) {
-                Ok(total) => total,
-                Err(e) => {
-                    log_error!("Failed to send file.");
-                    return Err(e);
-                }
-            };
-
-            pb.finish_with_message(format!("Sent {:?} bytes", sent).as_str());
+            send_file(&mut portal, &mut client, fpath)?;
         }
-    }
+    };
 
     Ok(())
 }
@@ -151,7 +211,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     control::set_virtual_terminal(true).unwrap();
 
     // Load/create config location
-    let mut cfg: AppConfig = confy::load("portal")?; // CARGO_BIN_NAME is nightly only
+    let mut cfg: AppConfig = confy::load("portal")?;
     log_status!(
         "Using portal.toml config, relay: {}!",
         cfg.relay_host.yellow()
@@ -160,15 +220,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Determin the IP address to connect to
     let addr: std::net::IpAddr = match cfg.relay_host.parse() {
         Ok(res) => res,
-        Err(_) => {
-            let ips: Vec<std::net::IpAddr> = lookup_host(&cfg.relay_host).unwrap();
-            ips[0]
-        }
+        Err(_) => *lookup_host(&cfg.relay_host)?
+            .first()
+            .ok_or(PortalError::NoPeer)?,
     };
 
     let addr: std::net::SocketAddr = format!("{}:{}", addr, cfg.relay_port).parse()?;
-
-    let mut client = match TcpStream::connect_timeout(&addr, std::time::Duration::new(3, 0)) {
+    let mut client = match TcpStream::connect_timeout(&addr, std::time::Duration::new(6, 0)) {
         Ok(res) => res,
         Err(e) => {
             log_error!("Failed to connect");
@@ -177,34 +235,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     log_success!("Connected to {:?}!", addr);
 
-    let (direction, id, pass, path) = match matches.subcommand() {
+    let (direction, id, pass, path, args) = match matches.subcommand() {
         ("send", Some(args)) => {
-            let id = gen_phrase(1);
-            let pass = gen_phrase(3);
-
-            log_success!(
-                "Tell your peer their pass-phrase is: {:?}",
-                format!("{}-{}", id, pass)
-            );
-
+            let (id, pass) = create_password();
             let file = args.value_of("filename").unwrap();
-
-            (Direction::Sender, id, pass, file.to_string())
+            (Direction::Sender, id, pass, file.to_string(), args)
         }
         ("recv", Some(args)) => {
-            let pass = rpassword::read_password_from_tty(Some("Enter pass-phrase: ")).unwrap();
+            let (id, pass) = prompt_password()?;
 
             // check if we need to override the download location
             if args.is_present("download_folder") {
                 cfg.download_location = args.value_of("download_folder").unwrap().to_string();
             }
 
-            // Parse ID from password
-            let mut pass = pass.split('-');
-            let id = pass.next().unwrap().to_string();
-            let opass = pass.collect::<Vec<&str>>().join("-");
-
-            (Direction::Receiver, id, opass, cfg.download_location)
+            (Direction::Receiver, id, pass, cfg.download_location, args)
         }
         _ => {
             log_error!("Please provide a valid subcommand. Run portal -h for more information.");
@@ -235,6 +280,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         Ok(_) => log_success!("Complete!"),
         Err(e) => log_error!("{:?}", e),
     }
+
+    // Must be called to wait for rendering
+    PROGRESS_BAR.join().unwrap();
 
     Ok(())
 }

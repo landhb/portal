@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // Key Exchange
 use sha2::{Digest, Sha256};
@@ -51,6 +51,10 @@ pub struct Portal {
     // KeyExchange information
     pub exchange: PortalKeyExchange,
 
+    // A nonce sequence that must be used for
+    // the entire session to ensure no re-use
+    nseq: NonceSequence,
+
     // Crypto state used to derive the key
     // once we receive a confirmation msg from the peer
     pub state: Option<Spake2<Ed25519Group>>,
@@ -94,6 +98,7 @@ impl Portal {
             direction,
             id: id_hash,
             exchange: outbound_msg.try_into().or(Err(CryptoError))?,
+            nseq: NonceSequence::new(),
             state: Some(s1),
             key: None,
         })
@@ -174,7 +179,7 @@ impl Portal {
         let key = self.key.as_ref().ok_or(NoPeer)?;
 
         // Obtain the file name stub from the path
-        let p = std::path::Path::new(path);
+        let p = std::path::PathBuf::from(path);
         let filename = p
             .file_name()
             .ok_or(BadFileName)?
@@ -182,25 +187,22 @@ impl Portal {
             .ok_or(BadFileName)?;
 
         // Map the file into memory
-        let mut mmap = self.map_readable_file(path)?;
+        let mut mmap = self.map_readable_file(&p)?;
 
         // Create the metatada object
         let metadata = Metadata {
             filesize: mmap.len() as u64,
-            filename: filename.as_bytes().to_vec(),
+            filename: filename.to_string(),
         };
 
-        // Create a nonce sequence to prevent re-use
-        let mut nseq = NonceSequence::new();
-
         // Write the file metadata over the encrypted channel
-        Protocol::encrypt_and_write_object(peer, key, &mut nseq, &metadata)?;
+        Protocol::encrypt_and_write_object(peer, key, &mut self.nseq, &metadata)?;
 
         // Send the encrypted region in chunks
         let mut total_sent = 0;
         for chunk in mmap[..].chunks_mut(CHUNK_SIZE) {
             // Encrypt the chunk in-place & send the header
-            Protocol::encrypt_and_write_header_only(peer, key, &mut nseq, chunk)?;
+            Protocol::encrypt_and_write_header_only(peer, key, &mut self.nseq, chunk)?;
 
             // Write the entire chunk
             peer.write_all(chunk)?;
@@ -245,16 +247,15 @@ impl Portal {
     /// // Begin receiving the file into /tmp
     /// portal.recv_file(&mut stream, Path::new("/tmp"), Some(confirm_download), Some(progress));
     /// ```
-    pub fn recv_file<R, V, D>(
+    pub fn recv_file<R, D>(
         &mut self,
         peer: &mut R,
         outdir: &Path,
-        verify: Option<V>,
+        expected: &Metadata,
         display: Option<D>,
     ) -> Result<Metadata, Box<dyn Error>>
     where
         R: Read,
-        V: Fn(&str, u64) -> bool,
         D: Fn(usize),
     {
         // Check that the key exists to confirm the handshake is complete
@@ -268,23 +269,16 @@ impl Portal {
         // Receive the metadata
         let metadata: Metadata = Protocol::read_encrypted_from(peer, key)?;
 
-        // Attempt to convert the filename to valid utf8
-        let name = match std::str::from_utf8(&metadata.filename) {
-            Ok(s) => outdir.join(s),
+        // Verify the metadata is expected
+        if metadata != *expected {
+            return Err(BadMsg.into());
+        }
+
+        // Ensure the filename is only the name component
+        let path = match Path::new(&metadata.filename).file_name() {
+            Some(s) => outdir.join(s),
             _ => return Err(BadFileName.into()),
         };
-
-        // Convert the filename into a path
-        let path = name.to_str().ok_or(BadFileName)?;
-
-        // Process the verify callback if applicable
-        match verify
-            .as_ref()
-            .map_or(true, |c| c(&path, metadata.filesize))
-        {
-            true => {}
-            false => return Err(Cancelled.into()),
-        }
 
         // Map the region into memory for writing
         let mut mmap = self.map_writeable_file(&path, metadata.filesize)?;
@@ -308,15 +302,64 @@ impl Portal {
         Ok(metadata)
     }
 
+    /// As the sender, communicate a TransferInfo struct to the receiver
+    /// so that they may confirm/deny the transfer. Returns an iterator
+    /// over the Metadata to pass to send_file().
+    pub fn outgoing<W>(
+        &mut self,
+        peer: &mut W,
+        info: TransferInfo,
+    ) -> Result<impl Iterator<Item = Metadata>, Box<dyn Error>>
+    where
+        W: Write,
+    {
+        // Check that the key exists to confirm the handshake is complete
+        let key = self.key.as_ref().ok_or(NoPeer)?;
+
+        // Send all TransferInfo for peer to confirm
+        Protocol::encrypt_and_write_object(peer, key, &mut self.nseq, &info)?;
+
+        // Return an iterator that returns metadata for each outgoing file
+        Ok(info.all.into_iter())
+    }
+
+    /// As the receiver, receive a TransferInfo struct which will be passed
+    /// to your optional verify callback. Which may be used to confirm/deny
+    /// the transfer. Returns an iterator over the Metadata of incoming files.
+    pub fn incoming<R, V>(
+        &mut self,
+        peer: &mut R,
+        verify: Option<V>,
+    ) -> Result<impl Iterator<Item = Metadata>, Box<dyn Error>>
+    where
+        R: Read,
+        V: Fn(&TransferInfo) -> bool,
+    {
+        // Check that the key exists to confirm the handshake is complete
+        let key = self.key.as_ref().ok_or(NoPeer)?;
+
+        // Receive the TransferInfo
+        let info: TransferInfo = Protocol::read_encrypted_from(peer, key)?;
+
+        // Process the verify callback if applicable
+        match verify.as_ref().map_or(true, |c| c(&info)) {
+            true => {}
+            false => return Err(Cancelled.into()),
+        }
+
+        // Return an iterator that returns metadata for each incoming file
+        Ok(info.all.into_iter())
+    }
+
     /// Helper: mmap's a file into memory for reading
-    fn map_readable_file<'a>(&'a self, f: &str) -> Result<MmapMut, Box<dyn Error>> {
+    fn map_readable_file<'a>(&'a self, f: &PathBuf) -> Result<MmapMut, Box<dyn Error>> {
         let file = File::open(f)?;
         let mmap = unsafe { MmapOptions::new().map_copy(&file)? };
         Ok(mmap)
     }
 
     /// Helper: mmap's a file into memory for writing
-    fn map_writeable_file<'a>(&'a self, f: &str, size: u64) -> Result<MmapMut, Box<dyn Error>> {
+    fn map_writeable_file<'a>(&'a self, f: &PathBuf, size: u64) -> Result<MmapMut, Box<dyn Error>> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)

@@ -28,8 +28,8 @@ bench = false
 portal-lib = {path ="../lib",version = "0.4.0"}
 anyhow = "1.0.32"
 clap = "2.33.3"
-rpassword = "5.0.0"
-indicatif = "0.15.0"
+rpassword = "6.0.1"
+indicatif = "0.16.2"
 colored = "2.0.0"
 serde = "1.0.116"
 confy = "0.4.0"

@@ -45,8 +45,16 @@ pub struct ConnectMessage {
 /// between peers after key derivation (encrypted)
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
 pub struct Metadata {
+    //pub id: u32,
     pub filesize: u64,
-    pub filename: Vec<u8>,
+    pub filename: String,
+}
+
+/// Contains the metadata for all files that will be sent
+/// during a particular transfer
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
+pub struct TransferInfo {
+    pub all: Vec<Metadata>,
 }
 
 /// The wrapped message type for every exchanged message
@@ -65,6 +73,10 @@ pub enum PortalMessage {
     /// All other messages are encrypted. This
     /// can be either metadata or a file chunk
     EncryptedDataHeader(EncryptedMessage),
+
+    /// The portal should now be closed. No additional
+    /// data to send.
+    Complete,
 }
 
 impl PortalMessage {
@@ -207,6 +219,7 @@ impl Protocol {
         // Receive the message header, return error if not EncryptedDataHeader
         let mut msg = match PortalMessage::recv(reader).or(Err(IOError))? {
             PortalMessage::EncryptedDataHeader(inner) => inner,
+            PortalMessage::Complete => return Err(Complete.into()),
             _ => return Err(BadMsg.into()),
         };
 
