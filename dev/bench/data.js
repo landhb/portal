@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1648688605022,
+  "lastUpdate": 1648735450242,
   "repoUrl": "https://github.com/landhb/portal",
   "entries": {
     "Mainline Benchmark Tracker": [
@@ -575,6 +575,78 @@ window.BENCHMARK_DATA = {
             "name": "larger-files/encrypt & send 500M",
             "value": 901222304,
             "range": "± 6054458",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "landhb@users.noreply.github.com",
+            "name": "landhb",
+            "username": "landhb"
+          },
+          "committer": {
+            "email": "landhb@users.noreply.github.com",
+            "name": "landhb",
+            "username": "landhb"
+          },
+          "distinct": true,
+          "id": "469a3762c3831b314543af578a205ddf06ee46cf",
+          "message": "Update NonceSequence to use wrapping addition",
+          "timestamp": "2022-03-31T09:43:00-04:00",
+          "tree_id": "6850e9dfea97f147cd5ff3fd57c95dd1c0022219",
+          "url": "https://github.com/landhb/portal/commit/469a3762c3831b314543af578a205ddf06ee46cf"
+        },
+        "date": 1648735449849,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "receive & decrypt 100k",
+            "value": 162219,
+            "range": "± 8176",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "receive & decrypt 1M",
+            "value": 1362462,
+            "range": "± 41314",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "larger-files/receive & decrypt 100M",
+            "value": 144766866,
+            "range": "± 15066513",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "larger-files/receive & decrypt 500M",
+            "value": 1342675155,
+            "range": "± 105854658",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "encrypt & send 100k",
+            "value": 189182,
+            "range": "± 7538",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "encrypt & send 1M",
+            "value": 1716057,
+            "range": "± 65095",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "larger-files/encrypt & send 100M",
+            "value": 187064517,
+            "range": "± 613390",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "larger-files/encrypt & send 500M",
+            "value": 935597302,
+            "range": "± 2222623",
             "unit": "ns/iter"
           }
         ]
