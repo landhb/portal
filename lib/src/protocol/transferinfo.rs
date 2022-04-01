@@ -25,8 +25,27 @@ pub struct TransferInfo {
     pub localpaths: Vec<PathBuf>,
 }
 
+/// Builder for TransferInfo
+pub struct TransferInfoBuilder(TransferInfo);
+
 impl TransferInfo {
-    /// Create a TransferInfo object
+    /// Owned TransferInfo
+    ///
+    /// ```
+    /// use std::path::PathBuf;
+    /// use std::error::Error;
+    /// use portal_lib::TransferInfo;
+    ///
+    /// fn create_info(files: Vec<PathBuf>) -> Result<TransferInfo, Box<dyn Error>> {
+    ///     let mut info = TransferInfo::empty();
+    ///
+    ///     for file in files {
+    ///         info.add_file(file.as_path())?;
+    ///     }
+    ///
+    ///     Ok(info)
+    /// }
+    /// ```
     pub fn empty() -> TransferInfo {
         TransferInfo {
             all: Vec::new(),
@@ -48,9 +67,39 @@ impl TransferInfo {
         });
         Ok(self)
     }
+}
 
-    /// Finalize this TransferInfo, consuming the mutable builder.
+impl TransferInfoBuilder {
+    /// Builder pattern for TransferInfo
+    ///
+    /// ```
+    /// use std::path::Path;
+    /// use std::error::Error;
+    /// use portal_lib::TransferInfoBuilder;
+    ///
+    /// fn some_method() -> Result<(), Box<dyn Error>> {
+    ///     // Use the builder to create a TransferInfo object
+    ///     let mut info = TransferInfoBuilder::new()
+    ///         .add_file(Path::new("/etc/passwd"))?
+    ///         .finalize();
+    ///
+    ///     // ... Pass it to methods that require it ...
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn new() -> TransferInfoBuilder {
+        Self {
+            0: TransferInfo::empty(),
+        }
+    }
+
+    pub fn add_file(mut self, path: &Path) -> Result<TransferInfoBuilder, Box<dyn Error>> {
+        let _ = self.0.add_file(path)?;
+        Ok(self)
+    }
+
+    /// Finalize the builder into a TransferInfo object
     pub fn finalize(self) -> TransferInfo {
-        self
+        self.0
     }
 }

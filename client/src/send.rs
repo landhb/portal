@@ -28,14 +28,14 @@ pub fn validate_files(files: Vec<PathBuf>) -> Result<TransferInfo, Box<dyn Error
         log_error!("Provide at least one file to send");
         return Err(PortalError::BadFileName.into());
     }
-
     // Begin adding files to this transfer
     let mut info = TransferInfo::empty();
+
     for file in files {
         info.add_file(file.as_path())?;
     }
 
-    Ok(info.finalize())
+    Ok(info)
 }
 
 /// Send a file
@@ -63,7 +63,7 @@ pub fn send_all(client: &mut TcpStream, files: Vec<PathBuf>) -> Result<(), Box<d
 
     log_status!("Starting transfer...");
 
-    for (fullpath, metadata) in portal.outgoing(client, info)? {
+    for (fullpath, metadata) in portal.outgoing(client, &info)? {
         // Start the progress bar
         let pb = MULTI.add(ProgressBar::new(metadata.filesize));
         pb.set_style(PSTYLE.clone());

@@ -140,12 +140,136 @@ impl Portal {
         Ok(())
     }
 
+    /// As the sender, communicate a TransferInfo struct to the receiver
+    /// so that they may confirm/deny the transfer. Returns an iterator
+    /// over the fullpath + Metadata to pass to send_file(). Allows the user
+    /// to send multiple files in one session.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    /// use std::error::Error;
+    /// use std::net::TcpStream;
+    /// use portal_lib::{Portal, Direction, TransferInfoBuilder};
+    ///
+    /// fn my_send() -> Result<(), Box<dyn Error>> {
+    ///     let mut portal = Portal::init(Direction::Sender,"id".into(), "password".into())?;
+    ///     let mut stream = TcpStream::connect("127.0.0.1:34254")?;
+    ///
+    ///     // The handshake must be performed first, otherwise
+    ///     // there is no shared key to encrypt the file with
+    ///     portal.handshake(&mut stream)?;
+    ///
+    ///     // Add any files/directories
+    ///     let info = TransferInfoBuilder::new()
+    ///         .add_file(Path::new("/etc/passwd"))?
+    ///         .finalize();
+    ///
+    ///     // Optional: implement a custom callback to display how much
+    ///     // has been transferred
+    ///     fn progress(transferred: usize) {
+    ///         println!("sent {:?} bytes", transferred);
+    ///     }
+    ///
+    ///     // Send every file in TransferInfo
+    ///     for (fullpath, metadata) in portal.outgoing(&mut stream, &info)? {
+    ///         portal.send_file(&mut stream, fullpath, Some(progress))?;
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn outgoing<'a, W>(
+        &mut self,
+        peer: &mut W,
+        info: &'a TransferInfo,
+    ) -> Result<impl Iterator<Item = (&'a PathBuf, &'a Metadata)>, Box<dyn Error>>
+    where
+        W: Write,
+    {
+        // Check that the key exists to confirm the handshake is complete
+        let key = self.key.as_ref().ok_or(NoPeer)?;
+
+        // Send all TransferInfo for peer to confirm
+        Protocol::encrypt_and_write_object(peer, key, &mut self.nseq, info)?;
+
+        // Return an iterator that returns metadata for each outgoing file
+        Ok(info.localpaths.iter().zip(info.all.iter()))
+    }
+
+    /// As the receiver, receive a TransferInfo struct which will be passed
+    /// to your optional verify callback. And may be used to confirm/deny
+    /// the transfer. Returns an iterator over the Metadata of incoming files.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    /// use std::error::Error;
+    /// use std::net::TcpStream;
+    /// use portal_lib::{Portal, Direction, TransferInfo};
+    ///
+    /// fn my_recv() -> Result<(), Box<dyn Error>> {
+    ///     let mut portal = Portal::init(Direction::Sender,"id".into(), "password".into())?;
+    ///     let mut stream = TcpStream::connect("127.0.0.1:34254")?;
+    ///
+    ///     // The handshake must be performed first, otherwise
+    ///     // there is no shared key to encrypt the file with
+    ///     portal.handshake(&mut stream)?;
+    ///
+    ///     // Optional: User callback to confirm/deny a transfer. If
+    ///     // none is provided, this will default accept the incoming file.
+    ///     // Return true to accept, false to reject the transfer.
+    ///     fn confirm_download(_info: &TransferInfo) -> bool { true }
+    ///
+    ///     // Optional: implement a custom callback to display how much
+    ///     // has been transferred
+    ///     fn progress(transferred: usize) {
+    ///         println!("sent {:?} bytes", transferred);
+    ///     }
+    ///
+    ///     // Decide where downloads should go
+    ///     let my_downloads = Path::new("/tmp");
+    ///
+    ///     // Receive every file in TransferInfo
+    ///     for metadata in portal.incoming(&mut stream, Some(confirm_download))? {
+    ///         portal.recv_file(&mut stream, my_downloads, Some(&metadata), Some(progress))?;
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn incoming<R, V>(
+        &mut self,
+        peer: &mut R,
+        verify: Option<V>,
+    ) -> Result<impl Iterator<Item = Metadata>, Box<dyn Error>>
+    where
+        R: Read,
+        V: Fn(&TransferInfo) -> bool,
+    {
+        // Check that the key exists to confirm the handshake is complete
+        let key = self.key.as_ref().ok_or(NoPeer)?;
+
+        // Receive the TransferInfo
+        let info: TransferInfo = Protocol::read_encrypted_from(peer, key)?;
+
+        // Process the verify callback if applicable
+        match verify.as_ref().map_or(true, |c| c(&info)) {
+            true => {}
+            false => return Err(Cancelled.into()),
+        }
+
+        // Return an iterator that returns metadata for each incoming file
+        Ok(info.all.into_iter())
+    }
+
     /// Send a given file over the portal. Must be called after performing the
     /// handshake or this method will return an error.
     ///
     /// # Example
     ///
     /// ```no_run
+    /// use std::path::Path;
     /// use std::net::TcpStream;
     /// use portal_lib::{Portal,Direction};
     ///
@@ -163,7 +287,8 @@ impl Portal {
     /// }
     ///
     /// // Begin sending the file
-    /// portal.send_file(&mut stream, "/etc/passwd", Some(progress));
+    /// let file = Path::new("/etc/passwd").to_path_buf();
+    /// portal.send_file(&mut stream, &file, Some(progress));
     /// ```
     pub fn send_file<W, D>(
         &mut self,
@@ -232,11 +357,6 @@ impl Portal {
     /// // there is no shared key to encrypt the file with
     /// portal.handshake(&mut stream);
     ///
-    /// // Optional: User callback to confirm/deny a transfer. If
-    /// // none is provided, this will default accept the incoming file.
-    /// // Return true to accept, false to reject the transfer.
-    /// fn confirm_download(path: &str, size: u64) -> bool { true }
-    ///
     /// // Optional: implement a custom callback to display how much
     /// // has been transferred
     /// fn progress(transferred: usize) {
@@ -244,7 +364,7 @@ impl Portal {
     /// }
     ///
     /// // Begin receiving the file into /tmp
-    /// portal.recv_file(&mut stream, Path::new("/tmp"), Some(confirm_download), Some(progress));
+    /// portal.recv_file(&mut stream, Path::new("/tmp"), None, Some(progress));
     /// ```
     pub fn recv_file<R, D>(
         &mut self,
@@ -299,55 +419,6 @@ impl Portal {
             return Err(Incomplete.into());
         }
         Ok(metadata)
-    }
-
-    /// As the sender, communicate a TransferInfo struct to the receiver
-    /// so that they may confirm/deny the transfer. Returns an iterator
-    /// over the Metadata to pass to send_file().
-    pub fn outgoing<W>(
-        &mut self,
-        peer: &mut W,
-        info: TransferInfo,
-    ) -> Result<impl Iterator<Item = (PathBuf, Metadata)>, Box<dyn Error>>
-    where
-        W: Write,
-    {
-        // Check that the key exists to confirm the handshake is complete
-        let key = self.key.as_ref().ok_or(NoPeer)?;
-
-        // Send all TransferInfo for peer to confirm
-        Protocol::encrypt_and_write_object(peer, key, &mut self.nseq, &info)?;
-
-        // Return an iterator that returns metadata for each outgoing file
-        Ok(info.localpaths.into_iter().zip(info.all.into_iter()))
-    }
-
-    /// As the receiver, receive a TransferInfo struct which will be passed
-    /// to your optional verify callback. Which may be used to confirm/deny
-    /// the transfer. Returns an iterator over the Metadata of incoming files.
-    pub fn incoming<R, V>(
-        &mut self,
-        peer: &mut R,
-        verify: Option<V>,
-    ) -> Result<impl Iterator<Item = Metadata>, Box<dyn Error>>
-    where
-        R: Read,
-        V: Fn(&TransferInfo) -> bool,
-    {
-        // Check that the key exists to confirm the handshake is complete
-        let key = self.key.as_ref().ok_or(NoPeer)?;
-
-        // Receive the TransferInfo
-        let info: TransferInfo = Protocol::read_encrypted_from(peer, key)?;
-
-        // Process the verify callback if applicable
-        match verify.as_ref().map_or(true, |c| c(&info)) {
-            true => {}
-            false => return Err(Cancelled.into()),
-        }
-
-        // Return an iterator that returns metadata for each incoming file
-        Ok(info.all.into_iter())
     }
 
     /// Helper: mmap's a file into memory for reading

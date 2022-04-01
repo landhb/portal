@@ -2,7 +2,7 @@ use super::{Direction, Protocol};
 use crate::errors::PortalError;
 use crate::protocol::{
     ConnectMessage, EncryptedMessage, NonceSequence, PortalConfirmation, PortalMessage,
-    TransferInfo,
+    TransferInfo, TransferInfoBuilder,
 };
 use crate::tests::MockTcpStream;
 use crate::Portal;
@@ -347,9 +347,10 @@ fn test_read_encrypted_zero_copy_buffertoosmall() {
 
 #[test]
 fn transferinfo_strips_paths() {
-    let info = TransferInfo::empty()
+    let info = TransferInfoBuilder::new()
         .add_file(Path::new("/etc/passwd"))
-        .unwrap();
+        .unwrap()
+        .finalize();
 
     let ser = bincode::serialize(&info).unwrap();
     let other: TransferInfo = bincode::deserialize(&ser).unwrap();

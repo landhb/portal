@@ -1,7 +1,7 @@
 //! Provides primary tests for the PortalFile abstraction
 //!
 use crate::protocol::{EncryptedMessage, PortalMessage};
-use crate::{errors::PortalError, Direction, Portal, TransferInfo};
+use crate::{errors::PortalError, Direction, Portal, TransferInfo, TransferInfoBuilder};
 use crate::{NO_PROGRESS_CALLBACK, NO_VERIFY_CALLBACK};
 use mockstream::SyncMockStream;
 use std::fs::File;
@@ -316,11 +316,12 @@ fn test_incoming_cancel() {
         // Complete handshake
         sender.handshake(&mut senderstream).unwrap();
 
-        let info = TransferInfo::empty()
+        let info = TransferInfoBuilder::new()
             .add_file(&Path::new(&file_path_str))
-            .unwrap();
+            .unwrap()
+            .finalize();
 
-        for (path, _metadata) in sender.outgoing(&mut senderstream, info).unwrap() {
+        for (path, _metadata) in sender.outgoing(&mut senderstream, &info).unwrap() {
             // Send the file
             let result = sender.send_file(&mut senderstream, &path, NO_PROGRESS_CALLBACK);
             assert!(result.is_ok());
