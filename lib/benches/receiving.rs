@@ -1,10 +1,11 @@
 extern crate portal_lib as portal;
 use criterion::{criterion_group, criterion_main, Criterion};
 use mockstream::MockStream;
+use portal::NO_PROGRESS_CALLBACK;
 use portal::{protocol::Protocol, Direction, Portal};
-use portal::{NO_PROGRESS_CALLBACK, NO_VERIFY_CALLBACK};
 use std::fs::File;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::time::{Duration, Instant};
 use tempdir::TempDir;
 
@@ -57,7 +58,7 @@ fn setup() -> (Portal, Portal) {
 /// since it is removed once it is dropped
 fn send_file(sender: &mut Portal, stream: &mut MockTcpStream, dir: &TempDir, size: u64) {
     let file_path = dir.path().join("testfile.raw");
-    let file_path_str = file_path.to_str().unwrap().to_owned();
+    let file_path_str = Path::new(file_path.to_str().unwrap()).to_path_buf();
     let mut tmp_file = File::create(file_path).unwrap();
     writeln!(tmp_file, "Arbitrary text here.").unwrap();
 
@@ -100,12 +101,7 @@ fn bench_file_receiver(c: &mut Criterion) {
 
                 // use download_file to read in the file data
                 let metatada = receiver
-                    .recv_file(
-                        &mut stream,
-                        out_dir.path(),
-                        NO_VERIFY_CALLBACK,
-                        NO_PROGRESS_CALLBACK,
-                    )
+                    .recv_file(&mut stream, out_dir.path(), None, NO_PROGRESS_CALLBACK)
                     .unwrap();
 
                 // End timing
@@ -131,12 +127,7 @@ fn bench_file_receiver(c: &mut Criterion) {
 
                 // use download_file to read in the file data
                 let metatada = receiver
-                    .recv_file(
-                        &mut stream,
-                        out_dir.path(),
-                        NO_VERIFY_CALLBACK,
-                        NO_PROGRESS_CALLBACK,
-                    )
+                    .recv_file(&mut stream, out_dir.path(), None, NO_PROGRESS_CALLBACK)
                     .unwrap();
 
                 // End timing
@@ -168,12 +159,7 @@ fn bench_file_receiver(c: &mut Criterion) {
 
                 // use download_file to read in the file data
                 let metatada = receiver
-                    .recv_file(
-                        &mut stream,
-                        out_dir.path(),
-                        NO_VERIFY_CALLBACK,
-                        NO_PROGRESS_CALLBACK,
-                    )
+                    .recv_file(&mut stream, out_dir.path(), None, NO_PROGRESS_CALLBACK)
                     .unwrap();
 
                 // End timing
@@ -199,12 +185,7 @@ fn bench_file_receiver(c: &mut Criterion) {
 
                 // use download_file to read in the file data
                 let metatada = receiver
-                    .recv_file(
-                        &mut stream,
-                        out_dir.path(),
-                        NO_VERIFY_CALLBACK,
-                        NO_PROGRESS_CALLBACK,
-                    )
+                    .recv_file(&mut stream, out_dir.path(), None, NO_PROGRESS_CALLBACK)
                     .unwrap();
 
                 // End timing

@@ -61,10 +61,6 @@ pub enum PortalMessage {
     /// All other messages are encrypted. This
     /// can be either metadata or a file chunk
     EncryptedDataHeader(EncryptedMessage),
-
-    /// The portal should now be closed. No additional
-    /// data to send.
-    Complete,
 }
 
 impl PortalMessage {
@@ -207,7 +203,6 @@ impl Protocol {
         // Receive the message header, return error if not EncryptedDataHeader
         let mut msg = match PortalMessage::recv(reader).or(Err(IOError))? {
             PortalMessage::EncryptedDataHeader(inner) => inner,
-            PortalMessage::Complete => return Err(Complete.into()),
             _ => return Err(BadMsg.into()),
         };
 

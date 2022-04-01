@@ -11,6 +11,15 @@ use std::convert::TryInto;
 use std::path::Path;
 use std::thread;
 
+macro_rules! assert_err {
+    ($expression:expr, $($pattern:tt)+) => {
+        match $expression {
+            $($pattern)+ => (),
+            ref e => panic!("expected `{}` but got `{:?}`", stringify!($($pattern)+), e),
+        }
+    }
+}
+
 #[test]
 fn test_nonce() {
     let mut n = NonceSequence::new();
@@ -365,4 +374,14 @@ fn transferinfo_strips_paths() {
     for file in info.all {
         assert!(!file.filename.contains("etc"));
     }
+}
+
+#[test]
+fn transferinfo_add_bad_path() {
+    let result = TransferInfoBuilder::new().add_file(Path::new("/etc/.."));
+    assert!(result.is_err());
+    assert_err!(
+        result.err().unwrap().downcast_ref::<PortalError>(),
+        Some(PortalError::BadFileName)
+    );
 }

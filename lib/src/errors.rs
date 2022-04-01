@@ -40,6 +40,4 @@ pub enum PortalError {
     WouldBlock,
     #[error("Object could not be serialized")]
     SerializeError,
-    #[error("The sender is finished.")]
-    Complete,
 }

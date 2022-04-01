@@ -4,6 +4,7 @@ use portal::NO_PROGRESS_CALLBACK;
 use portal::{protocol::Protocol, Direction, Portal};
 use std::fs::File;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use tempdir::TempDir;
 
 // Empty writer since we don't actually need to send the file anywhere
@@ -39,9 +40,9 @@ fn setup() -> Portal {
 
 /// Create a file of size, tempdir must live longer
 /// since it is removed once it is dropped
-fn create_file(dir: &TempDir, size: u64) -> String {
+fn create_file(dir: &TempDir, size: u64) -> PathBuf {
     let file_path = dir.path().join("testfile.raw");
-    let file_path_str = file_path.as_path().to_str().unwrap().to_owned();
+    let file_path_str = Path::new(file_path.as_path().to_str().unwrap()).to_path_buf();
     let mut tmp_file = File::create(file_path).unwrap();
     writeln!(tmp_file, "Arbitrary text here.").unwrap();
 
