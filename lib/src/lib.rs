@@ -168,7 +168,7 @@ impl Portal {
     pub fn send_file<W, D>(
         &mut self,
         peer: &mut W,
-        path: &str,
+        path: &PathBuf,
         callback: Option<D>,
     ) -> Result<usize, Box<dyn Error>>
     where
@@ -179,15 +179,14 @@ impl Portal {
         let key = self.key.as_ref().ok_or(NoPeer)?;
 
         // Obtain the file name stub from the path
-        let p = std::path::PathBuf::from(path);
-        let filename = p
+        let filename = path
             .file_name()
             .ok_or(BadFileName)?
             .to_str()
             .ok_or(BadFileName)?;
 
         // Map the file into memory
-        let mut mmap = self.map_readable_file(&p)?;
+        let mut mmap = self.map_readable_file(&path)?;
 
         // Create the metatada object
         let metadata = Metadata {
@@ -251,7 +250,7 @@ impl Portal {
         &mut self,
         peer: &mut R,
         outdir: &Path,
-        expected: &Metadata,
+        expected: Option<&Metadata>,
         display: Option<D>,
     ) -> Result<Metadata, Box<dyn Error>>
     where
@@ -269,8 +268,8 @@ impl Portal {
         // Receive the metadata
         let metadata: Metadata = Protocol::read_encrypted_from(peer, key)?;
 
-        // Verify the metadata is expected
-        if metadata != *expected {
+        // Verify the metadata is expected, if a comparison is provided
+        if expected.map_or(false, |exp| metadata != *exp) {
             return Err(BadMsg.into());
         }
 
@@ -309,7 +308,7 @@ impl Portal {
         &mut self,
         peer: &mut W,
         info: TransferInfo,
-    ) -> Result<impl Iterator<Item = Metadata>, Box<dyn Error>>
+    ) -> Result<impl Iterator<Item = (PathBuf, Metadata)>, Box<dyn Error>>
     where
         W: Write,
     {
@@ -320,7 +319,7 @@ impl Portal {
         Protocol::encrypt_and_write_object(peer, key, &mut self.nseq, &info)?;
 
         // Return an iterator that returns metadata for each outgoing file
-        Ok(info.all.into_iter())
+        Ok(info.localpaths.into_iter().zip(info.all.into_iter()))
     }
 
     /// As the receiver, receive a TransferInfo struct which will be passed

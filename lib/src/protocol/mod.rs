@@ -17,6 +17,10 @@ pub use exchange::*;
 mod encrypted;
 pub use encrypted::*;
 
+// Information about files being sent
+mod transferinfo;
+pub use transferinfo::*;
+
 #[cfg(test)]
 mod tests;
 
@@ -39,22 +43,6 @@ pub enum Direction {
 pub struct ConnectMessage {
     pub id: String,
     pub direction: Direction,
-}
-
-/// Metadata about the transfer to be exchanged
-/// between peers after key derivation (encrypted)
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
-pub struct Metadata {
-    //pub id: u32,
-    pub filesize: u64,
-    pub filename: String,
-}
-
-/// Contains the metadata for all files that will be sent
-/// during a particular transfer
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
-pub struct TransferInfo {
-    pub all: Vec<Metadata>,
 }
 
 /// The wrapped message type for every exchanged message

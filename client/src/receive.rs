@@ -76,7 +76,7 @@ pub fn recv_all(client: &mut TcpStream, download_directory: PathBuf) -> Result<(
             .recv_file(
                 client,
                 Path::new(&download_directory),
-                &file,
+                Some(&file), // since we received TransferInfo, verify that the file is expected
                 Some(progress),
             )
             .ok();
