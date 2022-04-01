@@ -1,5 +1,6 @@
 use crate::{MULTI, PSTYLE};
 use colored::*;
+use dialoguer::{Confirm, Input};
 use indicatif::ProgressBar;
 use portal::{Direction, Portal, TransferInfo};
 use std::{
@@ -11,11 +12,28 @@ use std::{
 /// The receiver must prompt the user for the pass-phrase
 /// Splits the input and returns a tuple (id, password)
 fn prompt_password() -> Result<(String, String), Box<dyn Error>> {
-    let input = rpassword::prompt_password("Enter pass-phrase: ")?;
+    let input: String = Input::new()
+        .with_prompt(prompt!("Enter pass-phrase: "))
+        .interact_text()?;
     let mut input = input.split('-');
     let id = input.next().unwrap().to_string();
     let opass = input.collect::<Vec<&str>>().join("-");
     Ok((id, opass))
+}
+
+// User callback to confirm/deny a transfer
+fn confirm_download(info: &TransferInfo) -> bool {
+    for file in info.all.iter() {
+        log_status!(
+            "Incoming file: {:?}, size: {:?}",
+            file.filename,
+            file.filesize
+        );
+    }
+    Confirm::new()
+        .with_prompt(prompt!("Download the file(s)?"))
+        .interact()
+        .map_or(false, |r| r)
 }
 
 /// Recv a file
@@ -40,29 +58,18 @@ pub fn recv_all(client: &mut TcpStream, download_directory: PathBuf) -> Result<(
 
     log_success!("Completed portal handshake with peer.");
 
-    // User callback to confirm/deny a transfer
-    let confirm_download = |info: &TransferInfo| -> bool {
-        for file in info.all.iter() {
-            log_status!(
-                "Incoming file: {:?}, size: {:?}",
-                file.filename,
-                file.filesize
-            );
-        }
-        let ans = rpassword::prompt_password("Download the file(s)? [y/N]: ").unwrap();
-        true
-    };
+    // TODO: Establish P2P QUIC connection here?
 
     log_status!("Waiting for peer to begin transfer...");
 
     // For each file create a new progress bar
-    for file in portal.incoming(client, Some(confirm_download))? {
+    for metadata in portal.incoming(client, Some(confirm_download))? {
         // Create a new bar
-        let pb = MULTI.add(ProgressBar::new(file.filesize));
+        let pb = MULTI.add(ProgressBar::new(metadata.filesize));
         pb.set_style(PSTYLE.clone());
 
         // Set filename as the message
-        pb.set_message(file.filename.clone());
+        pb.set_message(metadata.filename.clone());
 
         // User callback to display progress
         let progress = |transferred: usize| {
@@ -72,11 +79,12 @@ pub fn recv_all(client: &mut TcpStream, download_directory: PathBuf) -> Result<(
         // Required to render
         pb.tick();
 
+        // Receive the file
         let _metadata = portal
             .recv_file(
                 client,
                 Path::new(&download_directory),
-                Some(&file), // since we received TransferInfo, verify that the file is expected
+                Some(&metadata),
                 Some(progress),
             )
             .ok();

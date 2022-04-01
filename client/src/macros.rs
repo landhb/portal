@@ -12,3 +12,8 @@ macro_rules! log_error {
 macro_rules! log_success {
     ($($arg:tt)*) => (println!("{} {}", "[+]".green().bold(), format_args!($($arg)*)));
 }
+
+#[macro_export]
+macro_rules! prompt {
+    ($($arg:tt)*) => (format!("{} {}", "[?]".yellow().bold(), format_args!($($arg)*)));
+}

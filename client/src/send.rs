@@ -2,12 +2,8 @@ use crate::wordlist::gen_phrase;
 use crate::{MULTI, PSTYLE};
 use colored::*;
 use indicatif::ProgressBar;
-use portal::{errors::PortalError, Direction, Metadata, Portal, TransferInfo};
-use std::{
-    error::Error,
-    net::TcpStream,
-    path::{Path, PathBuf},
-};
+use portal::{errors::PortalError, Direction, Portal, TransferInfo};
+use std::{error::Error, net::TcpStream, path::PathBuf};
 
 /// As the sender, a pass-phrase muse be created to deliver
 /// out-of-band (in secret) to the receiver.
@@ -60,6 +56,8 @@ pub fn send_all(client: &mut TcpStream, files: Vec<PathBuf>) -> Result<(), Box<d
         );
         e
     })?;
+
+    // TODO: Establish P2P QUIC connection here?
 
     log_status!("Starting transfer...");
 
