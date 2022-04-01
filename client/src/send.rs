@@ -8,8 +8,7 @@ use std::{error::Error, net::TcpStream, path::PathBuf};
 /// As the sender, a pass-phrase muse be created to deliver
 /// out-of-band (in secret) to the receiver.
 fn create_password() -> (String, String) {
-    let id = gen_phrase(1);
-    let pass = gen_phrase(3);
+    let (id, pass) = (gen_phrase(1), gen_phrase(3));
     log_success!(
         "Tell your peer their pass-phrase is: {:?}",
         format!("{}-{}", id, pass)
@@ -24,9 +23,9 @@ pub fn validate_files(files: Vec<PathBuf>) -> Result<TransferInfo, Box<dyn Error
         log_error!("Provide at least one file to send");
         return Err(PortalError::BadFileName.into());
     }
+
     // Begin adding files to this transfer
     let mut info = TransferInfo::empty();
-
     for file in files {
         info.add_file(file.as_path())?;
     }
