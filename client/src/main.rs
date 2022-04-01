@@ -29,16 +29,6 @@ use receive::recv_all;
 mod send;
 use send::send_all;
 
-lazy_static! {
-    /// Global multi-bar that contains other progress bars
-    pub static ref MULTI: MultiProgress = MultiProgress::with_draw_target(ProgressDrawTarget::stdout());
-
-    /// All bars have the same style
-    pub static ref PSTYLE: ProgressStyle = ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}")
-        .progress_chars("#>-");
-}
-
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "portal",
@@ -53,12 +43,22 @@ enum Command {
         files: Vec<PathBuf>,
     },
 
-    /// Recv file(s) from a peer
+    /// Receive file(s) from a peer
     Recv {
         /// Optional: override the download directory in the config file.
         #[structopt(short, long)]
         download_dir: Option<PathBuf>,
     },
+}
+
+lazy_static! {
+    /// Global multi-bar that contains other progress bars
+    pub static ref MULTI: MultiProgress = MultiProgress::with_draw_target(ProgressDrawTarget::stdout());
+
+    /// All bars have the same style
+    pub static ref PSTYLE: ProgressStyle = ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}")
+        .progress_chars("#>-");
 }
 
 fn main() -> Result<(), Box<dyn Error>> {

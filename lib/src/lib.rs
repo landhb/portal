@@ -33,7 +33,7 @@ pub const DEFAULT_PORT: u16 = 13265;
 pub const CHUNK_SIZE: usize = 65536;
 
 /// None constant for optional verify callbacks - Helper
-pub const NO_VERIFY_CALLBACK: Option<fn(&str, u64) -> bool> = None::<fn(&str, u64) -> bool>;
+pub const NO_VERIFY_CALLBACK: Option<fn(&TransferInfo) -> bool> = None::<fn(&TransferInfo) -> bool>;
 
 /// None constant for optional progress callbacks - Helper
 pub const NO_PROGRESS_CALLBACK: Option<fn(usize)> = None::<fn(usize)>;

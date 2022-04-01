@@ -21,8 +21,20 @@ fn create_password() -> (String, String) {
     (id, pass)
 }
 
+/// Converts a list of input files into TransferInfo
+pub fn validate_files() -> Result<TransferInfo, Box<dyn Error>> {
+    // Validate that there is at least one file to send
+    if files.is_empty() {
+        log_error!("Provide at least one file to send");
+        return Err(());
+    }
+}
+
 /// Send a file
 pub fn send_all(client: &mut TcpStream, files: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
+    // Parse the input files
+    let info = validate_files(files)?;
+
     // Sender must generate the password
     let (id, pass) = create_password();
 
