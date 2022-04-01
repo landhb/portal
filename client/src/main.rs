@@ -9,7 +9,6 @@ use portal::{errors::PortalError, protocol::Metadata, Direction, Portal, Transfe
 use std::error::Error;
 use std::net::TcpStream;
 use std::path::Path;
-use std::sync::Arc;
 
 #[macro_use]
 extern crate lazy_static;
@@ -23,10 +22,8 @@ mod wordlist;
 use wordlist::gen_phrase;
 
 lazy_static! {
-    /// Global multi-bar that contains other progress bars
-    pub static ref PROGRESS_BAR: Arc<MultiProgress> = Arc::new(
-        MultiProgress::with_draw_target(ProgressDrawTarget::stdout())
-    );
+    // Global multi-bar that contains other progress bars
+    pub static ref MULTI: MultiProgress = MultiProgress::with_draw_target(ProgressDrawTarget::stdout());
 
     /// All bars have the same style
     pub static ref PSTYLE: ProgressStyle = ProgressStyle::default_bar()
@@ -83,7 +80,7 @@ fn send_file(
 
     for file in portal.outgoing(client, info)? {
         // Start the progress bar
-        let pb = PROGRESS_BAR.add(ProgressBar::new(file.filesize));
+        let pb = MULTI.add(ProgressBar::new(file.filesize));
         pb.set_style(PSTYLE.clone());
 
         // Required to render
@@ -98,7 +95,7 @@ fn send_file(
         };
 
         // Begin the transfer
-        let sent = match portal.send_file(client, fpath, Some(progress)) {
+        let _sent = match portal.send_file(client, &fpath, Some(progress)) {
             Ok(total) => total,
             Err(e) => {
                 log_error!("Failed to send file.");
@@ -136,11 +133,8 @@ fn recv_all(
     // For each file create a new progress bar
     for file in portal.incoming(client, Some(confirm_download))? {
         // Create a new bar
-        let pb = PROGRESS_BAR.add(ProgressBar::new(file.filesize));
+        let pb = MULTI.add(ProgressBar::new(file.filesize));
         pb.set_style(PSTYLE.clone());
-
-        // Required to render
-        pb.tick();
 
         // Set filename as the message
         pb.set_message(file.filename.clone());
@@ -150,31 +144,15 @@ fn recv_all(
             pb.set_position(transferred as u64);
         };
 
-        let metadata =
-            match portal.recv_file(client, Path::new(download_directory), &file, Some(progress)) {
-                Ok(result) => result,
-                Err(e) => {
-                    log_error!("Failed to recv file.");
-                    return Err(e);
-                }
-            };
+        // Required to render
+        pb.tick();
+
+        let _metadata = portal
+            .recv_file(client, Path::new(download_directory), &file, Some(progress))
+            .ok();
 
         pb.finish();
     }
-
-    Ok(())
-}
-
-/// Transfer
-fn transfer(mut portal: Portal, fpath: &str, mut client: TcpStream) -> Result<(), Box<dyn Error>> {
-    let msg = match portal.get_direction() {
-        Direction::Receiver => {
-            recv_all(&mut portal, &mut client, fpath)?;
-        }
-        Direction::Sender => {
-            send_file(&mut portal, &mut client, fpath)?;
-        }
-    };
 
     Ok(())
 }
@@ -226,20 +204,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let addr: std::net::SocketAddr = format!("{}:{}", addr, cfg.relay_port).parse()?;
-    let mut client = match TcpStream::connect_timeout(&addr, std::time::Duration::new(6, 0)) {
-        Ok(res) => res,
-        Err(e) => {
+    let mut client =
+        TcpStream::connect_timeout(&addr, std::time::Duration::new(6, 0)).map_err(|e| {
             log_error!("Failed to connect");
-            return Err(e.into());
-        }
-    };
+            e
+        })?;
     log_success!("Connected to {:?}!", addr);
 
-    let (direction, id, pass, path, args) = match matches.subcommand() {
+    let (direction, id, pass, path) = match matches.subcommand() {
         ("send", Some(args)) => {
             let (id, pass) = create_password();
             let file = args.value_of("filename").unwrap();
-            (Direction::Sender, id, pass, file.to_string(), args)
+            (Direction::Sender, id, pass, file.to_string())
         }
         ("recv", Some(args)) => {
             let (id, pass) = prompt_password()?;
@@ -249,7 +225,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 cfg.download_location = args.value_of("download_folder").unwrap().to_string();
             }
 
-            (Direction::Receiver, id, pass, cfg.download_location, args)
+            (Direction::Receiver, id, pass, cfg.download_location)
         }
         _ => {
             log_error!("Please provide a valid subcommand. Run portal -h for more information.");
@@ -258,31 +234,43 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     // Initialize portal
-    let mut portal = match Portal::init(direction, id, pass) {
-        Ok(res) => res,
-        Err(e) => {
-            log_error!("Failed to initialize portal");
-            return Err(e.into());
-        }
-    };
+    let mut portal = Portal::init(direction, id, pass).map_err(|e| {
+        log_error!("Failed to initialize portal");
+        e
+    })?;
 
     // Complete handshake
-    match portal.handshake(&mut client) {
-        Ok(_) => log_success!("Completed portal handshake with peer."),
-        x => {
-            log_error!("Failed to complete portal handshake. Verify client version & passphrase.");
-            return x;
-        }
-    }
+    portal.handshake(&mut client).map_err(|e| {
+        log_error!("Failed to complete portal handshake. Verify client version & passphrase.");
+        e
+    })?;
 
-    // Begin transfer
-    match transfer(portal, &path, client) {
+    log_success!("Completed portal handshake with peer.");
+
+    // Create a hidden bar so the progress bar doesn't
+    // go out of scope.
+    let hidden = MULTI.add(ProgressBar::hidden());
+
+    // Start rendering the bars
+    let thread = std::thread::spawn(|| {
+        MULTI.join().unwrap();
+    });
+
+    // Begin the transfer
+    let result = match portal.get_direction() {
+        Direction::Receiver => recv_all(&mut portal, &mut client, &path),
+        Direction::Sender => send_file(&mut portal, &mut client, &path),
+    };
+
+    // Allow the hidden bar to go out of scope
+    // which allows the global one to as well
+    hidden.finish_and_clear();
+    thread.join().unwrap();
+
+    match result {
         Ok(_) => log_success!("Complete!"),
         Err(e) => log_error!("{:?}", e),
     }
-
-    // Must be called to wait for rendering
-    PROGRESS_BAR.join().unwrap();
 
     Ok(())
 }
