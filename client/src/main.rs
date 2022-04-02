@@ -4,7 +4,8 @@ use anyhow::Result;
 use colored::*;
 use dns_lookup::lookup_host;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use portal::errors::PortalError;
+use portal::{errors::PortalError, TransferInfo};
+use prettytable::Table;
 use std::error::Error;
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -12,6 +13,9 @@ use structopt::StructOpt;
 
 #[macro_use]
 extern crate lazy_static;
+
+#[macro_use]
+extern crate prettytable;
 
 #[macro_use]
 mod macros;
@@ -28,6 +32,17 @@ use receive::recv_all;
 /// Sender path
 mod send;
 use send::send_all;
+
+lazy_static! {
+    /// Global multi-bar that contains other progress bars
+    pub static ref MULTI: MultiProgress =
+        MultiProgress::with_draw_target(ProgressDrawTarget::stdout());
+
+    /// All bars have the same style
+    pub static ref PSTYLE: ProgressStyle = ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}")
+        .progress_chars("#>-");
+}
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -51,14 +66,17 @@ enum Command {
     },
 }
 
-lazy_static! {
-    /// Global multi-bar that contains other progress bars
-    pub static ref MULTI: MultiProgress = MultiProgress::with_draw_target(ProgressDrawTarget::stdout());
+/// Display incoming/outgoing files to the user beforehand
+fn display_info(info: &TransferInfo) {
+    let mut table = Table::new();
+    table.set_format(*prettytable::format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
+    table.add_row(row![Fy->"Name", Fy->"Size"]);
 
-    /// All bars have the same style
-    pub static ref PSTYLE: ProgressStyle = ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}")
-        .progress_chars("#>-");
+    for entry in &info.all {
+        table.add_row(row![entry.filename, entry.filesize]);
+    }
+
+    table.printstd();
 }
 
 fn main() -> Result<(), Box<dyn Error>> {

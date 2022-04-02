@@ -16,6 +16,28 @@ fn create_password() -> (String, String) {
     (id, pass)
 }
 
+// Helper method to enumerate directories depth 1
+fn add_all(info: &mut TransferInfo, dir: PathBuf) -> Result<(), Box<dyn Error>> {
+    // Collect all entries
+    let entries = std::fs::read_dir(dir)?
+        .filter_map(|res| {
+            res.as_ref().map_or(None, |e| {
+                if e.metadata().map_or(false, |f| f.is_file()) {
+                    return Some(e.path());
+                }
+                None
+            })
+        })
+        .collect::<Vec<PathBuf>>();
+
+    // Add them individually
+    for entry in entries {
+        info.add_file(&entry)?;
+    }
+
+    Ok(())
+}
+
 /// Converts a list of input files into TransferInfo
 pub fn validate_files(files: Vec<PathBuf>) -> Result<TransferInfo, Box<dyn Error>> {
     // Validate that there is at least one file to send
@@ -26,8 +48,15 @@ pub fn validate_files(files: Vec<PathBuf>) -> Result<TransferInfo, Box<dyn Error
 
     // Begin adding files to this transfer
     let mut info = TransferInfo::empty();
-    for file in files {
-        info.add_file(file.as_path())?;
+    for item in files {
+        match item.is_dir() {
+            true => {
+                add_all(&mut info, item)?;
+            }
+            false => {
+                info.add_file(item.as_path())?;
+            }
+        }
     }
 
     Ok(info)
@@ -37,6 +66,9 @@ pub fn validate_files(files: Vec<PathBuf>) -> Result<TransferInfo, Box<dyn Error
 pub fn send_all(client: &mut TcpStream, files: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
     // Parse the input files
     let info = validate_files(files)?;
+
+    log_status!("Outgoing files:");
+    crate::display_info(&info);
 
     // Sender must generate the password
     let (id, pass) = create_password();

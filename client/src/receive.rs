@@ -23,13 +23,8 @@ fn prompt_password() -> Result<(String, String), Box<dyn Error>> {
 
 // User callback to confirm/deny a transfer
 fn confirm_download(info: &TransferInfo) -> bool {
-    for file in info.all.iter() {
-        log_status!(
-            "Incoming file: {:?}, size: {:?}",
-            file.filename,
-            file.filesize
-        );
-    }
+    log_status!("Incoming files:");
+    crate::display_info(info);
     Confirm::new()
         .with_prompt(prompt!("Download the file(s)?"))
         .interact()
