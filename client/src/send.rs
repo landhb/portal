@@ -3,6 +3,7 @@ use crate::{MULTI, PSTYLE};
 use colored::*;
 use indicatif::ProgressBar;
 use portal::{errors::PortalError, Direction, Portal, TransferInfo};
+use std::fs::DirEntry;
 use std::{error::Error, net::TcpStream, path::PathBuf};
 
 /// As the sender, a pass-phrase muse be created to deliver
@@ -18,16 +19,16 @@ fn create_password() -> (String, String) {
 
 // Helper method to enumerate directories depth 1
 fn add_all(info: &mut TransferInfo, dir: PathBuf) -> Result<(), Box<dyn Error>> {
+    fn check_file(entry: &DirEntry) -> Option<PathBuf> {
+        if !entry.metadata().map_or(false, |f| f.is_file()) {
+            return None;
+        }
+        Some(entry.path())
+    }
+
     // Collect all entries
     let entries = std::fs::read_dir(dir)?
-        .filter_map(|res| {
-            res.as_ref().map_or(None, |e| {
-                if e.metadata().map_or(false, |f| f.is_file()) {
-                    return Some(e.path());
-                }
-                None
-            })
-        })
+        .filter_map(|res| res.as_ref().map_or(None, |e| check_file(e)))
         .collect::<Vec<PathBuf>>();
 
     // Add them individually
