@@ -6,7 +6,7 @@ This crate enables a consumer to:
 
 - Create/serialize/deserialize Portal request/response messages.
 - Negoticate a symmetric key with a peer using [SPAKE2](https://docs.rs/spake2/0.2.0/spake2) 
-- Encrypt files with [Chacha20poly1305](https://blog.cloudflare.com/it-takes-two-to-chacha-poly/) using the [RustCrypto implementation](https://docs.rs/chacha20poly1305)
+- Encrypt files with [Chacha20-Poly1305](https://blog.cloudflare.com/it-takes-two-to-chacha-poly/) using either the [RustCrypto](https://docs.rs/chacha20poly1305) implementation or [Ring's](https://briansmith.org/rustdoc/ring/aead/index.html)
 - Send/receive files through a Portal relay
 
 The library is broken up into two abstractions:
@@ -17,56 +17,86 @@ The library is broken up into two abstractions:
 ### Higher Level API - Example of Sending a file:
 
 ```rust
+use std::path::Path;
+use std::error::Error;
 use std::net::TcpStream;
-use portal_lib::{Portal, Direction};
+use portal_lib::{Portal, Direction, TransferInfoBuilder};
 
-// Connect to the relay
-let mut stream = TcpStream::connect("127.0.0.1:34254").unwrap();
+fn my_send() -> Result<(), Box<dyn Error>> {
 
-// Init a portal
-let mut portal = Portal::init(Direction::Sender,"id".into(), "password".into()).unwrap();
+    // Securely generate/exchange ID & Password with peer out-of-band
+    let id = String::from("id");
+    let password = String::from("password");
 
-// The handshake must be performed first, otherwise
-// there is no shared key to encrypt the file with
-portal.handshake(&mut stream).unwrap();
+    // Connect to the relay - the ID will be used to connect the peers
+    let mut portal = Portal::init(Direction::Sender, id, password)?;
+    let mut stream = TcpStream::connect("127.0.0.1:34254")?;
 
-// Optional: implement a custom callback to display how much
-// has been transferred
-fn progress(transferred: usize) {
-    println!("sent {:?} bytes", transferred);
+    // The handshake must be performed first, otherwise
+    // there is no shared key to encrypt the file with
+    portal.handshake(&mut stream)?;
+
+    // Add any files/directories
+    let info = TransferInfoBuilder::new()
+        .add_file(Path::new("/etc/passwd"))?
+        .finalize();
+
+    // Optional: implement a custom callback to display how much
+    // has been transferred
+    fn progress(transferred: usize) {
+       println!("sent {:?} bytes", transferred);
+    }
+
+    // Send every file in TransferInfo
+    for (fullpath, metadata) in portal.outgoing(&mut stream, &info)? {
+        portal.send_file(&mut stream, fullpath, Some(progress))?;
+    }
+    Ok(())
 }
-
-// Begin sending the file
-portal.send_file(&mut stream, "/etc/passwd", Some(progress));
 ```
 
 ### Higher Level API - Example of Receiving a file:
 
 ```rust
 use std::path::Path;
+use std::error::Error;
 use std::net::TcpStream;
-use portal_lib::{Portal,Direction};
+use portal_lib::{Portal, Direction, TransferInfo};
 
-let mut portal = Portal::init(Direction::Sender,"id".into(), "password".into()).unwrap();
-let mut stream = TcpStream::connect("127.0.0.1:34254").unwrap();
+fn my_recv() -> Result<(), Box<dyn Error>> {
 
-// The handshake must be performed first, otherwise
-// there is no shared key to encrypt the file with
-portal.handshake(&mut stream).unwrap();
+    // Securely generate/exchange ID & Password with peer out-of-band
+    let id = String::from("id");
+    let password = String::from("password");
 
-// Optional: User callback to confirm/deny a transfer. If
-// none is provided, this will default accept the incoming file.
-// Return true to accept, false to reject the transfer.
-fn confirm_download(path: &str, size: u64) -> bool { true }
+    // Connect to the relay - the ID will be used to connect the peers
+    let mut portal = Portal::init(Direction::Sender, id, password)?;
+    let mut stream = TcpStream::connect("127.0.0.1:34254")?;
 
-// Optional: implement a custom callback to display how much
-// has been transferred
-fn progress(transferred: usize) {
-    println!("received {:?} bytes", transferred);
+    // The handshake must be performed first, otherwise
+    // there is no shared key to encrypt the file with
+    portal.handshake(&mut stream)?;
+
+    // Optional: User callback to confirm/deny a transfer. If
+    // none is provided, this will default accept the incoming file.
+    // Return true to accept, false to reject the transfer.
+    fn confirm_download(_info: &TransferInfo) -> bool { true }
+
+    // Optional: implement a custom callback to display how much
+    // has been transferred
+    fn progress(transferred: usize) {
+        println!("received {:?} bytes", transferred);
+    }
+
+    // Decide where downloads should go
+    let my_downloads = Path::new("/tmp");
+
+    // Receive every file in TransferInfo
+    for metadata in portal.incoming(&mut stream, Some(confirm_download))? {
+        portal.recv_file(&mut stream, my_downloads, Some(&metadata), Some(progress))?;
+    }
+    Ok(())
 }
-
-// Begin receiving the file into /tmp
-portal.recv_file(&mut stream, Path::new("/tmp"), Some(confirm_download), Some(progress));
 ```
 
 ### Lower Level API - Example of SPAKE2 key negotiation:

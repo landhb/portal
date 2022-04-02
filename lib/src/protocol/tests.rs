@@ -2,20 +2,33 @@ use super::{Direction, Protocol};
 use crate::errors::PortalError;
 use crate::protocol::{
     ConnectMessage, EncryptedMessage, NonceSequence, PortalConfirmation, PortalMessage,
+    TransferInfo, TransferInfoBuilder,
 };
 use crate::tests::MockTcpStream;
 use crate::Portal;
 use mockstream::SyncMockStream;
 use std::convert::TryInto;
+use std::path::Path;
 use std::thread;
+
+macro_rules! assert_err {
+    ($expression:expr, $($pattern:tt)+) => {
+        match $expression {
+            $($pattern)+ => (),
+            ref e => panic!("expected `{}` but got `{:?}`", stringify!($($pattern)+), e),
+        }
+    }
+}
 
 #[test]
 fn test_nonce() {
     let mut n = NonceSequence::new();
     let mut old = [0u8; 12];
-    for _ in 0..2_000_000 {
+    for _ in 0..5_000_000 {
         let new = n.next().unwrap();
-        assert!(new != old);
+        // test that every nonce is greater than the last
+        // which means it is larger & different than all previous
+        assert!(new > old);
         old = new;
     }
 }
@@ -339,4 +352,36 @@ fn test_read_encrypted_zero_copy_buffertoosmall() {
     // Retreive and verify the result
     let result = handle.join().unwrap();
     assert_eq!(*result, PortalError::BufferTooSmall);
+}
+
+#[test]
+fn transferinfo_strips_paths() {
+    let info = TransferInfoBuilder::new()
+        .add_file(Path::new("/etc/passwd"))
+        .unwrap()
+        .finalize();
+
+    let ser = bincode::serialize(&info).unwrap();
+    let other: TransferInfo = bincode::deserialize(&ser).unwrap();
+
+    // Assert localpaths are stripped
+    assert!(other.localpaths.is_empty());
+
+    // Metadata should be identical
+    assert_eq!(info.all, other.all);
+
+    // Metadata should not contain the folder "/etc"
+    for file in info.all {
+        assert!(!file.filename.contains("etc"));
+    }
+}
+
+#[test]
+fn transferinfo_add_bad_path() {
+    let result = TransferInfoBuilder::new().add_file(Path::new("/etc/.."));
+    assert!(result.is_err());
+    assert_err!(
+        result.err().unwrap().downcast_ref::<PortalError>(),
+        Some(PortalError::BadFileName)
+    );
 }

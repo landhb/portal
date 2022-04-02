@@ -1,7 +1,7 @@
 //! Provides primary tests for the PortalFile abstraction
 //!
 use crate::protocol::{EncryptedMessage, PortalMessage};
-use crate::{errors::PortalError, Direction, Portal};
+use crate::{errors::PortalError, Direction, Portal, TransferInfo, TransferInfoBuilder};
 use crate::{NO_PROGRESS_CALLBACK, NO_VERIFY_CALLBACK};
 use mockstream::SyncMockStream;
 use std::fs::File;
@@ -127,7 +127,7 @@ fn test_file_roundtrip() {
     // Create test file
     let tmp_dir = TempDir::new("test_recv_file_bad_outdir").unwrap();
     let file_path = tmp_dir.path().join("randomfile.txt");
-    let file_path_str = file_path.to_str().unwrap().to_owned();
+    let file_path_str = Path::new(&file_path.to_str().unwrap().to_owned()).to_path_buf();
     let mut tmp_file = File::create(file_path).unwrap();
     writeln!(tmp_file, "Test File").unwrap();
 
@@ -162,7 +162,7 @@ fn test_file_roundtrip() {
         .recv_file(
             &mut receiverstream,
             tmp_dir.path(),
-            NO_VERIFY_CALLBACK,
+            None,
             NO_PROGRESS_CALLBACK,
         )
         .unwrap();
@@ -175,11 +175,79 @@ fn test_file_roundtrip() {
 }
 
 #[test]
+fn test_incoming_outgoing_roundtrip() {
+    // Create test file
+    let tmp_dir = TempDir::new("test_recv_file_bad_outdir").unwrap();
+    let file_path = tmp_dir.path().join("randomfile.txt");
+    let file_path_str = Path::new(&file_path.to_str().unwrap().to_owned()).to_path_buf();
+    let mut tmp_file = File::create(file_path).unwrap();
+    writeln!(tmp_file, "Test File").unwrap();
+
+    // receiver
+    let dir = Direction::Receiver;
+    let pass = "test".to_string();
+    let mut receiver = Portal::init(dir, "id".to_string(), pass).unwrap();
+
+    // sender
+    let dir = Direction::Sender;
+    let pass = "test".to_string();
+    let mut sender = Portal::init(dir, "id".to_string(), pass).unwrap();
+
+    // mock channel
+    let (mut senderstream, mut receiverstream) = MockTcpStream::channel();
+
+    let sender_thread = thread::spawn(move || {
+        // Complete handshake
+        sender.handshake(&mut senderstream).unwrap();
+
+        let info = TransferInfoBuilder::new()
+            .add_file(&Path::new(&file_path_str))
+            .unwrap()
+            .finalize();
+
+        for (path, _metadata) in sender.outgoing(&mut senderstream, &info).unwrap() {
+            // Send the file
+            let result = sender.send_file(&mut senderstream, &path, NO_PROGRESS_CALLBACK);
+            assert!(result.is_ok());
+        }
+    });
+
+    // VerifyCallback
+    fn verify_callback(info: &TransferInfo) -> bool {
+        assert!(info
+            .all
+            .iter()
+            .any(|m| m.filename.as_str() == "randomfile.txt"));
+        true
+    }
+
+    // Complete handshake
+    receiver.handshake(&mut receiverstream).unwrap();
+
+    for m in receiver
+        .incoming(&mut receiverstream, Some(verify_callback))
+        .unwrap()
+    {
+        let d = receiver
+            .recv_file(
+                &mut receiverstream,
+                tmp_dir.path(),
+                Some(&m),
+                NO_PROGRESS_CALLBACK,
+            )
+            .unwrap();
+        assert_eq!(d, m);
+    }
+
+    sender_thread.join().unwrap();
+}
+
+#[test]
 fn portal_map_bad_path() {
     let dir = Direction::Receiver;
     let pass = "test".to_string();
     let receiver = Portal::init(dir, "id".to_string(), pass).unwrap();
-    let result = receiver.map_writeable_file("/notafile", 12);
+    let result = receiver.map_writeable_file(&Path::new("/notafile").to_path_buf(), 12);
     assert!(result.is_err());
 }
 
@@ -212,7 +280,11 @@ fn portal_send_file_no_peer() {
 
     // will return error
     let mut stream = SyncMockStream::new();
-    let result = portal.send_file(&mut stream, "/tmp/passwd", NO_PROGRESS_CALLBACK);
+    let result = portal.send_file(
+        &mut stream,
+        &Path::new("/tmp/passwd").to_path_buf(),
+        NO_PROGRESS_CALLBACK,
+    );
     assert!(result.is_err());
     assert_err!(
         result.err().unwrap().downcast_ref::<PortalError>(),
@@ -228,12 +300,7 @@ fn portal_recv_file_no_peer() {
 
     // will panic due to lack of peer
     let mut stream = SyncMockStream::new();
-    let result = portal.recv_file(
-        &mut stream,
-        Path::new("/tmp"),
-        NO_VERIFY_CALLBACK,
-        NO_PROGRESS_CALLBACK,
-    );
+    let result = portal.recv_file(&mut stream, Path::new("/tmp"), None, NO_PROGRESS_CALLBACK);
     assert!(result.is_err());
     assert_err!(
         result.err().unwrap().downcast_ref::<PortalError>(),
@@ -246,7 +313,7 @@ fn test_recv_file_bad_outdir() {
     // Create test file
     let tmp_dir = TempDir::new("test_recv_file_bad_outdir").unwrap();
     let file_path = tmp_dir.path().join("randomfile.txt");
-    let file_path_str = file_path.to_str().unwrap().to_owned();
+    let file_path_str = Path::new(&file_path.to_str().unwrap().to_owned()).to_path_buf();
     let mut tmp_file = File::create(file_path).unwrap();
     writeln!(tmp_file, "Test File").unwrap();
 
@@ -279,7 +346,7 @@ fn test_recv_file_bad_outdir() {
     let result = receiver.recv_file(
         &mut receiverstream,
         Path::new("/tmp/test.txt"),
-        NO_VERIFY_CALLBACK,
+        None,
         NO_PROGRESS_CALLBACK,
     );
     assert!(result.is_err());
@@ -292,11 +359,11 @@ fn test_recv_file_bad_outdir() {
 }
 
 #[test]
-fn test_recv_file_cancel() {
+fn test_incoming_cancel() {
     // Create test file
     let tmp_dir = TempDir::new("test_recv_file_bad_outdir").unwrap();
     let file_path = tmp_dir.path().join("randomfile.txt");
-    let file_path_str = file_path.to_str().unwrap().to_owned();
+    let file_path_str = Path::new(&file_path.to_str().unwrap().to_owned()).to_path_buf();
     let mut tmp_file = File::create(file_path).unwrap();
     writeln!(tmp_file, "Test File").unwrap();
 
@@ -317,26 +384,24 @@ fn test_recv_file_cancel() {
         // Complete handshake
         sender.handshake(&mut senderstream).unwrap();
 
-        // Send the file
-        let result = sender.send_file(&mut senderstream, &file_path_str, NO_PROGRESS_CALLBACK);
+        let info = TransferInfoBuilder::new()
+            .add_file(&Path::new(&file_path_str))
+            .unwrap()
+            .finalize();
+
+        let result = sender.outgoing(&mut senderstream, &info);
         assert!(result.is_ok());
-        result.unwrap()
     });
+
+    // VerifyCallback that cancels every download
+    fn cancel_all(_info: &TransferInfo) -> bool {
+        false
+    }
 
     // Complete handshake
     receiver.handshake(&mut receiverstream).unwrap();
 
-    // VerifyCallback that cancels every download
-    fn cancel_all(_path: &str, _size: u64) -> bool {
-        false
-    }
-
-    let result = receiver.recv_file(
-        &mut receiverstream,
-        tmp_dir.path(),
-        Some(cancel_all),
-        NO_PROGRESS_CALLBACK,
-    );
+    let result = receiver.incoming(&mut receiverstream, Some(cancel_all));
     assert!(result.is_err());
     assert_err!(
         result.err().unwrap().downcast_ref::<PortalError>(),
@@ -347,11 +412,54 @@ fn test_recv_file_cancel() {
 }
 
 #[test]
+fn test_incoming_default_verify_accepts() {
+    // Create test file
+    let tmp_dir = TempDir::new("test_recv_file_bad_outdir").unwrap();
+    let file_path = tmp_dir.path().join("randomfile.txt");
+    let file_path_str = Path::new(&file_path.to_str().unwrap().to_owned()).to_path_buf();
+    let mut tmp_file = File::create(file_path).unwrap();
+    writeln!(tmp_file, "Test File").unwrap();
+
+    // receiver
+    let dir = Direction::Receiver;
+    let pass = "test".to_string();
+    let mut receiver = Portal::init(dir, "id".to_string(), pass).unwrap();
+
+    // sender
+    let dir = Direction::Sender;
+    let pass = "test".to_string();
+    let mut sender = Portal::init(dir, "id".to_string(), pass).unwrap();
+
+    // mock channel
+    let (mut senderstream, mut receiverstream) = MockTcpStream::channel();
+
+    let sender_thread = thread::spawn(move || {
+        // Complete handshake
+        sender.handshake(&mut senderstream).unwrap();
+
+        let info = TransferInfoBuilder::new()
+            .add_file(&Path::new(&file_path_str))
+            .unwrap()
+            .finalize();
+
+        let result = sender.outgoing(&mut senderstream, &info);
+        assert!(result.is_ok());
+    });
+
+    // Complete handshake
+    receiver.handshake(&mut receiverstream).unwrap();
+
+    let result = receiver.incoming(&mut receiverstream, NO_VERIFY_CALLBACK);
+    assert!(result.is_ok());
+    sender_thread.join().unwrap();
+}
+
+#[test]
 fn test_display_callback() {
     // Create test file
     let tmp_dir = TempDir::new("test_display_callback").unwrap();
     let file_path = tmp_dir.path().join("randomfile.txt");
-    let file_path_str = file_path.to_str().unwrap().to_owned();
+    let file_path_str = Path::new(&file_path.to_str().unwrap().to_owned()).to_path_buf();
     let mut tmp_file = File::create(file_path).unwrap();
     writeln!(tmp_file, "Test File").unwrap();
     let file_size = tmp_file.metadata().unwrap().len();
@@ -374,11 +482,6 @@ fn test_display_callback() {
         assert!(size as u64 <= file_size);
     };
 
-    // Verify callback
-    fn accept_all(_path: &str, _size: u64) -> bool {
-        true
-    }
-
     let sender_thread = thread::spawn(move || {
         // Complete handshake
         sender.handshake(&mut senderstream).unwrap();
@@ -393,12 +496,7 @@ fn test_display_callback() {
     receiver.handshake(&mut receiverstream).unwrap();
 
     // Receive the file
-    let _result = receiver.recv_file(
-        &mut receiverstream,
-        tmp_dir.path(),
-        Some(accept_all),
-        Some(progress),
-    );
+    let _result = receiver.recv_file(&mut receiverstream, tmp_dir.path(), None, Some(progress));
 
     sender_thread.join().unwrap();
 }

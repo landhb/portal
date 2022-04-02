@@ -20,6 +20,7 @@ const TAG_SIZE: usize = 16;
 /// An abstraction around a nonce sequence. Safely
 /// ensures there is no nonce re-use during a session
 /// with a single key.
+#[derive(PartialEq, Debug)]
 pub struct NonceSequence([u8; TAG_SIZE]);
 
 /// All encrypted messages must have associated state data (nonce, tag)
@@ -109,7 +110,7 @@ impl EncryptedMessage {
         // Set the length
         state.len = data.len();
 
-        // Encrypt the data in-place. For ring we must append the tag after
+        // Encrypt the data in-place.
         let tag = ring_key_chacha20
             .seal_in_place_separate_tag(ring_nonce, Aad::empty(), data)
             .or(Err(EncryptError))?;
