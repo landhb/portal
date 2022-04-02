@@ -2,7 +2,7 @@ use crate::{MULTI, PSTYLE};
 use colored::*;
 use dialoguer::{Confirm, Input};
 use indicatif::ProgressBar;
-use portal::{Direction, Portal, TransferInfo};
+use portal::{errors::PortalError, Direction, Portal, TransferInfo};
 use std::{
     error::Error,
     net::TcpStream,
@@ -16,7 +16,7 @@ fn prompt_password() -> Result<(String, String), Box<dyn Error>> {
         .with_prompt(prompt!("Enter pass-phrase: "))
         .interact_text()?;
     let mut input = input.split('-');
-    let id = input.next().unwrap().to_string();
+    let id = input.next().ok_or(PortalError::NoneError)?.to_string();
     let opass = input.collect::<Vec<&str>>().join("-");
     Ok((id, opass))
 }

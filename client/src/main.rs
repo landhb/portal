@@ -95,11 +95,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let addr: std::net::SocketAddr = format!("{}:{}", addr, cfg.relay_port).parse()?;
 
     // Connect to the relay
-    let mut client =
-        TcpStream::connect_timeout(&addr, std::time::Duration::new(6, 0)).map_err(|e| {
-            log_error!("Failed to connect");
-            e
-        })?;
+    let timeout = std::time::Duration::new(6, 0);
+    let mut client = TcpStream::connect_timeout(&addr, timeout).map_err(|e| {
+        log_error!("Failed to connect to relay");
+        e
+    })?;
     log_success!("Connected to {:?}!", addr);
 
     // Create a hidden bar so the progress bar doesn't

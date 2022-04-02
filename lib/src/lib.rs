@@ -1,3 +1,17 @@
+//! A small Protocol Library for [Portal](https://github.com/landhb/portal) - An encrypted file transfer utility
+//!
+//! This crate enables a consumer to:
+//!
+//! - Create/serialize/deserialize Portal request/response messages.
+//! - Negoticate a symmetric key with a peer using [SPAKE2](https://docs.rs/spake2/0.2.0/spake2)
+//! - Encrypt files with [Chacha20-Poly1305](https://blog.cloudflare.com/it-takes-two-to-chacha-poly/) using either the
+//!     [RustCrypto](https://docs.rs/chacha20poly1305) implementation or [Ring's](https://briansmith.org/rustdoc/ring/aead/index.html)
+//! - Send/receive files through a Portal relay
+//!
+//! The library is broken up into two abstractions:
+//!
+//! - A higher level API, exposted via the `Portal` struct, to facilitate automating transfers easily
+//! - A lower level API, exposed via the `protocol::Protocol` struct, if you need access to lower-level facilities
 use memmap::{MmapMut, MmapOptions};
 use std::convert::TryInto;
 use std::error::Error;
@@ -45,11 +59,11 @@ pub const NO_PROGRESS_CALLBACK: Option<fn(usize)> = None::<fn(usize)>;
 pub struct Portal {
     // Information to correlate
     // connections on the relay
-    pub id: String,
-    pub direction: Direction,
+    pub(crate) id: String,
+    pub(crate) direction: Direction,
 
     // KeyExchange information
-    pub exchange: PortalKeyExchange,
+    pub(crate) exchange: PortalKeyExchange,
 
     // A nonce sequence that must be used for
     // the entire session to ensure no re-use
@@ -57,7 +71,7 @@ pub struct Portal {
 
     // Crypto state used to derive the key
     // once we receive a confirmation msg from the peer
-    pub state: Option<Spake2<Ed25519Group>>,
+    pub(crate) state: Option<Spake2<Ed25519Group>>,
 
     // Derived session key
     key: Option<Vec<u8>>,
@@ -154,6 +168,11 @@ impl Portal {
     /// use portal_lib::{Portal, Direction, TransferInfoBuilder};
     ///
     /// fn my_send() -> Result<(), Box<dyn Error>> {
+    ///     // Securely generate/exchange ID & Password with peer out-of-band
+    ///     let id = String::from("id");
+    ///     let password = String::from("password");
+    ///
+    ///     // Connect to the relay
     ///     let mut portal = Portal::init(Direction::Sender,"id".into(), "password".into())?;
     ///     let mut stream = TcpStream::connect("127.0.0.1:34254")?;
     ///
@@ -210,7 +229,13 @@ impl Portal {
     /// use portal_lib::{Portal, Direction, TransferInfo};
     ///
     /// fn my_recv() -> Result<(), Box<dyn Error>> {
-    ///     let mut portal = Portal::init(Direction::Sender,"id".into(), "password".into())?;
+    ///
+    ///     // Securely generate/exchange ID & Password with peer out-of-band
+    ///     let id = String::from("id");
+    ///     let password = String::from("password");
+    ///
+    ///     // Connect to the relay
+    ///     let mut portal = Portal::init(Direction::Sender, id, password)?;
     ///     let mut stream = TcpStream::connect("127.0.0.1:34254")?;
     ///
     ///     // The handshake must be performed first, otherwise
@@ -225,7 +250,7 @@ impl Portal {
     ///     // Optional: implement a custom callback to display how much
     ///     // has been transferred
     ///     fn progress(transferred: usize) {
-    ///         println!("sent {:?} bytes", transferred);
+    ///         println!("received {:?} bytes", transferred);
     ///     }
     ///
     ///     // Decide where downloads should go
