@@ -2,7 +2,7 @@ extern crate portal_lib as portal;
 
 use crate::Endpoint;
 use crate::{log, MAX_SPLICE_SIZE};
-use anyhow::Result;
+use std::error::Error;
 use std::os::unix::io::AsRawFd;
 
 /**
@@ -11,7 +11,7 @@ use std::os::unix::io::AsRawFd;
  *  When the src_fd is readable, we will attempt to splice data into the dst_fd,
  *  using an intermediary pipe
  */
-pub fn tcp_splice(endpoint: &Endpoint, peer: &Endpoint) -> Result<bool> {
+pub fn tcp_splice(endpoint: &Endpoint, peer: &Endpoint) -> Result<bool, Box<dyn Error>> {
     let mut rx;
     let mut tx;
 
@@ -106,7 +106,7 @@ pub fn tcp_splice(endpoint: &Endpoint, peer: &Endpoint) -> Result<bool> {
 /**
  * Drain the pipe of any additional data destined for an Endpoint
  */
-pub fn drain_pipe(endpoint: &Endpoint) -> Result<bool> {
+pub fn drain_pipe(endpoint: &Endpoint) -> Result<bool, Box<dyn Error>> {
     let reader = match &endpoint.peer_reader {
         Some(p) => p,
         None => {
