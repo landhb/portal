@@ -59,11 +59,11 @@ pub const NO_PROGRESS_CALLBACK: Option<fn(usize)> = None::<fn(usize)>;
 pub struct Portal {
     // Information to correlate
     // connections on the relay
-    pub(crate) id: String,
-    pub(crate) direction: Direction,
+    pub id: String,
+    pub direction: Direction,
 
     // KeyExchange information
-    pub(crate) exchange: PortalKeyExchange,
+    pub exchange: PortalKeyExchange,
 
     // A nonce sequence that must be used for
     // the entire session to ensure no re-use
@@ -71,7 +71,7 @@ pub struct Portal {
 
     // Crypto state used to derive the key
     // once we receive a confirmation msg from the peer
-    pub(crate) state: Option<Spake2<Ed25519Group>>,
+    pub state: Option<Spake2<Ed25519Group>>,
 
     // Derived session key
     key: Option<Vec<u8>>,
