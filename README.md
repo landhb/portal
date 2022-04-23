@@ -44,7 +44,7 @@ portal recv
 If you wish to run your own relay, you can install the binary on a server with:
 
 ```
-cargo install --git https://github.com/landhb/portal portal-relay
+cargo install portal-relay
 ```
 
 Note: An example service file is included in the `relay/` directory.
