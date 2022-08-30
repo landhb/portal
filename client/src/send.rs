@@ -110,7 +110,7 @@ pub fn send_all(client: &mut TcpStream, files: Vec<PathBuf>) -> Result<(), Box<d
         };
 
         // Begin the transfer
-        let _sent = portal.send_file(client, &fullpath, Some(progress)).ok();
+        let _sent = portal.send_file(client, &fullpath, Some(progress))?;
 
         pb.finish();
     }

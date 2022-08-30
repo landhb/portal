@@ -75,14 +75,12 @@ pub fn recv_all(client: &mut TcpStream, download_directory: PathBuf) -> Result<(
         pb.tick();
 
         // Receive the file
-        let _metadata = portal
-            .recv_file(
-                client,
-                Path::new(&download_directory),
-                Some(&metadata),
-                Some(progress),
-            )
-            .ok();
+        let _metadata = portal.recv_file(
+            client,
+            Path::new(&download_directory),
+            Some(&metadata),
+            Some(progress),
+        )?;
 
         pb.finish();
     }
