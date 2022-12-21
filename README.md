@@ -98,5 +98,5 @@ This tool was a quick early pandemic project to learn rust, and has similar idea
 [codecov]: https://img.shields.io/codecov/c/github/landhb/portal?style=flat-square
 [codecov-url]: https://codecov.io/gh/landhb/portal
 
-[build]: https://img.shields.io/github/workflow/status/landhb/portal/Build/master?style=flat-square
+[build]: https://img.shields.io/github/actions/workflow/status/landhb/portal/build.yml?branch=main&style=flat-square
 [build-url]: https://github.com/landhb/portal/actions?query=workflow%3ABuild
