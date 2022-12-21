@@ -1,6 +1,5 @@
 use crate::errors::PortalError::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::convert::TryInto;
 use std::error::Error;
 use std::io::{Read, Write};
 
@@ -31,7 +30,7 @@ pub struct Protocol;
 
 /// An enum to describe the direction of each file transfer
 /// participant (i.e Sender/Receiver)
-#[derive(Serialize, Deserialize, PartialEq, Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Copy, Clone)]
 pub enum Direction {
     Sender,
     Receiver,
@@ -39,14 +38,14 @@ pub enum Direction {
 
 /// Information to correlate
 /// connections on the relay
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct ConnectMessage {
     pub id: String,
     pub direction: Direction,
 }
 
 /// The wrapped message type for every exchanged message
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum PortalMessage {
     /// Provide enough information to the relay to pair
     /// you with the peer.
@@ -78,7 +77,7 @@ impl PortalMessage {
 
     /// Deserialize from existing data
     pub fn parse(data: &[u8]) -> Result<Self, Box<dyn Error>> {
-        Ok(bincode::deserialize(&data)?)
+        Ok(bincode::deserialize(data)?)
     }
 }
 
@@ -109,7 +108,7 @@ impl Protocol {
 
         // Recv the peer's data
         match PortalMessage::recv(peer).or(Err(IOError))? {
-            PortalMessage::KeyExchange(data) => Ok(data.try_into().or(Err(BadMsg))?),
+            PortalMessage::KeyExchange(data) => Ok(data),
             _ => Err(Box::new(BadMsg)),
         }
     }
@@ -121,7 +120,7 @@ impl Protocol {
         state: Spake2<Ed25519Group>,
         peer_data: &PortalKeyExchange,
     ) -> Result<Vec<u8>, Box<dyn Error>> {
-        state.finish(peer_data.into()).or(Err(BadMsg.into()))
+        Ok(state.finish(peer_data.into()).or(Err(BadMsg))?)
     }
 
     /// Use the derived session key to verify that our peer has derived
@@ -140,10 +139,10 @@ impl Protocol {
         let h = Hkdf::<Sha256>::new(None, key);
         let mut sender_confirm = [0u8; 42];
         let mut receiver_confirm = [0u8; 42];
-        h.expand(&sender_info.as_bytes(), &mut sender_confirm)
-            .unwrap();
-        h.expand(&receiver_info.as_bytes(), &mut receiver_confirm)
-            .unwrap();
+        h.expand(sender_info.as_bytes(), &mut sender_confirm)
+            .or(Err(BadMsg))?;
+        h.expand(receiver_info.as_bytes(), &mut receiver_confirm)
+            .or(Err(BadMsg))?;
 
         // Determine our vs their message based on direction
         let (to_send, expected) = match direction {
@@ -152,10 +151,10 @@ impl Protocol {
         };
 
         // The result we'll expect
-        let expected = PortalConfirmation { 0: expected };
+        let expected = PortalConfirmation(expected);
 
         // Send our data
-        PortalMessage::Confirm(PortalConfirmation { 0: to_send }).send(peer)?;
+        PortalMessage::Confirm(PortalConfirmation(to_send)).send(peer)?;
 
         // Receive the peer's version
         let peer_msg = match PortalMessage::recv(peer)? {
@@ -185,7 +184,7 @@ impl Protocol {
         Protocol::read_encrypted_zero_copy(reader, key, &mut storage)?;
 
         // Deserialize the result
-        bincode::deserialize(&storage).or(Err(BadMsg.into()))
+        Ok(bincode::deserialize(&storage).or(Err(BadMsg))?)
     }
 
     /// Read an encrypted message from the peer, writing the resulting
