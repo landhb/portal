@@ -1,173 +1,204 @@
 use mio::net::TcpStream;
 use mio::Token;
-use os_pipe::pipe;
+use mio_extras::channel::Sender;
+use os_pipe::{pipe, PipeReader, PipeWriter};
 use portal_lib::errors::PortalError;
-use portal_lib::protocol::{ConnectMessage, PortalMessage};
+use portal_lib::protocol::{ConnectMessage, Direction, PortalMessage};
+use std::collections::HashMap;
 use std::error::Error;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::os::unix::io::AsRawFd;
+use std::sync::MutexGuard;
 use std::time::SystemTime;
 
 use crate::{networking, Endpoint, EndpointPair, MAX_SPLICE_SIZE, PENDING_ENDPOINTS};
 
+/// The recevier will have a placeholder token before
+/// receiving
 const PLACEHOLDER: usize = 0;
 
-/**
- * Attempt to parse a Portal request from the client and match it
- * with a peer. If matched, the pair will be added to an event loop
- */
-pub fn register(
+pub struct ConnectionBroker {
+    /// Active remote address
     addr: SocketAddr,
-    mut connection: TcpStream,
-    tx: mio_extras::channel::Sender<EndpointPair>,
-) -> Result<(), Box<dyn Error>> {
-    let mut received_data = Vec::with_capacity(1024);
-    while received_data.is_empty() {
-        match networking::recv_generic(&mut connection, &mut received_data) {
-            Ok(v) if v < 0 => {
-                break; // done recieving
-            }
-            Ok(_) => {}
-            Err(_) => {
-                break;
-            }
+    /// Active incoming stream
+    connection: TcpStream,
+    /// Channel for completed endpoints
+    tx: Sender<EndpointPair>,
+}
+
+impl ConnectionBroker {
+    /// Initiate a new broker to connect two endpoints.
+    pub fn new(addr: SocketAddr, connection: TcpStream, tx: Sender<EndpointPair>) -> Self {
+        Self {
+            addr,
+            connection,
+            tx,
         }
     }
 
-    log::trace!("[?] Received {:?} bytes", received_data.len());
+    /// Accept a new receiver by attempting to match it with an existing Sender.
+    ///
+    /// The Receiver should be 2nd to connect, after entering the appropriate password
+    /// provided by the Sender. So if there is no matching peer this ends the connection.
+    pub fn add_receiver(
+        self,
+        req: ConnectMessage,
+        reader: PipeReader,
+        writer: PipeWriter,
+        mut endpoints: MutexGuard<'_, HashMap<String, Endpoint>>,
+    ) -> Result<(), Box<dyn Error>> {
+        // Remove any endpoint with a matching ID
+        let mut peer = endpoints
+            .remove(&req.id)
+            .ok_or_else(|| Into::<Box<dyn Error>>::into("No peer."))?;
+        log::info!("[{:.6}] Receiver matched with Sender", req.id);
 
-    // attempt to recieve a portal request
-    let req: ConnectMessage = match PortalMessage::parse(&received_data)? {
-        PortalMessage::Connect(r) => r,
-        x => {
-            log::debug!("Got incorrect PortalMessage: {:?}", x);
-            return Err(PortalError::BadMsg.into());
+        // If the peer already has a connection, disregard this one
+        if peer.has_peer {
+            let _ = self.connection.shutdown(std::net::Shutdown::Both);
+            log::info!(
+                "[{:.6}] Canceled receiving connection: Sender already has a different connection.",
+                req.id
+            );
+            return Ok(());
         }
-    };
 
-    // Lookup existing endpoint with this ID
-    let id = req.id;
-    let dir = req.direction;
+        log::debug!("[{:.6}] Acknowledgement sent to peer", req.id);
 
-    log::info!("[{:.6}] New Portal request: {:?}({:?})", id, dir, addr);
+        // Update the peer with the pipe information
+        let old_reader = std::mem::replace(&mut peer.peer_reader, Some(reader));
+        peer.has_peer = true;
 
-    // Clear old entries before accepting, will keep
-    // connections < 15 min old
-    let mut ref_endpoints = PENDING_ENDPOINTS.lock().unwrap();
-    ref_endpoints.retain(|_, v| {
-        v.has_peer
-            || (v.time_added.elapsed().unwrap().as_secs()
-                < std::time::Duration::from_secs(60 * 15).as_secs())
-    });
+        // create this endpoint
+        let endpoint = Endpoint {
+            id: req.id.clone(),
+            dir: Direction::Receiver,
+            stream: self.connection,
+            peer_reader: old_reader,
+            peer_writer: Some(writer), //None,
+            has_peer: true,
+            time_added: SystemTime::now(),
+        };
 
-    match dir {
-        portal::Direction::Receiver => {
-            //let mut ref_endpoints = endpoints.borrow_mut();
-            let mut peer = match ref_endpoints.remove(&id.to_string()) {
-                Some(p) => p,
-                None => {
-                    return Ok(());
-                }
-            };
+        log::debug!("[{:.6}] Added Receiver", req.id);
 
-            log::info!("[{:.6}] Receiver matched with Sender", id);
+        let pair = EndpointPair {
+            sender: peer,
+            sender_token: Token(PLACEHOLDER),
+            receiver: endpoint,
+            receiver_token: Token(PLACEHOLDER),
+        };
 
-            // if the peer already has a connection, disregard this one
-            if peer.has_peer {
-                let _ = connection.shutdown(std::net::Shutdown::Both);
-                log::info!("[{:.6}] Canceled receiving connection: Sender already has a different connection.", id);
-                return Ok(());
-            }
-
-            // This pipe will be used to send data from Receiver->Sender
-            // so the Sender will keep the read side, and the Receiver will
-            // keep the write side
-            let (reader2, mut writer2) = match pipe() {
-                Ok((r, w)) => (r, w),
-                Err(err) => {
-                    log::error!(
-                        "[{:.6}] Error creating pipe for peer communication. Reason: {}",
-                        id,
-                        err
-                    );
-                    return Err(Box::new(err));
-                }
-            };
-
-            // write the acknowledgement response to both pipe endpoints
-            writer2.write_all(&received_data)?;
-
-            log::debug!("[{:.6}] Acknowledgement sent to peer", id);
-
-            // update the peer with the pipe information
-            let old_reader = std::mem::replace(&mut peer.peer_reader, Some(reader2));
-            peer.has_peer = true;
-
-            // create this endpoint
-            let endpoint = Endpoint {
-                id: id.to_string(),
-                dir,
-                stream: connection,
-                peer_reader: old_reader,
-                peer_writer: Some(writer2), //None,
-                has_peer: true,
-                time_added: SystemTime::now(),
-            };
-
-            log::debug!("[{:.6}] Added Receiver", id);
-
-            let pair = EndpointPair {
-                sender: peer,
-                sender_token: Token(PLACEHOLDER),
-                receiver: endpoint,
-                receiver_token: Token(PLACEHOLDER),
-            };
-
-            // Communicate the new pair over the MPSC channel
-            // back to the main event loop
-            tx.send(pair)?;
-        }
-        portal::Direction::Sender => {
-            // Kill the connection if this ID is being used by another pending sender
-            let search =
-                ref_endpoints
-                    .iter()
-                    .find_map(|(key, val)| if *val.id == *id { Some(key) } else { None });
-
-            if search.is_some() {
-                return Ok(());
-            }
-
-            // This pipe will be used to send data from Sender->Receiver
-            let (reader, mut writer) = pipe().unwrap();
-
-            // resize the pipe that we will be using for the actual
-            // file transfer
-            unsafe {
-                let res = libc::fcntl(reader.as_raw_fd(), libc::F_SETPIPE_SZ, MAX_SPLICE_SIZE);
-                if res < 0 {
-                    return Ok(());
-                }
-            }
-
-            // Buffer this request in the pipe for when the peer connects
-            writer.write_all(&received_data)?;
-
-            let endpoint = Endpoint {
-                id: id.to_string(),
-                dir,
-                stream: connection,
-                peer_writer: Some(writer),
-                peer_reader: Some(reader),
-                has_peer: false,
-                time_added: SystemTime::now(),
-            };
-
-            log::debug!("[{:.6}] Added Sender", id);
-
-            ref_endpoints.entry(id.to_string()).or_insert(endpoint);
-        }
+        // Communicate the new pair over the MPSC channel
+        // back to the main event loop
+        self.tx.send(pair)?;
+        Ok(())
     }
-    Ok(())
+
+    /// Accept a new sender by adding it to a pending queue of non-paired endpoints
+    ///
+    /// The Sender should be 1st to connect, and will remain pending until the timeout
+    /// or until a valid Receiver connects to the relay.
+    pub fn add_sender(
+        self,
+        req: ConnectMessage,
+        reader: PipeReader,
+        writer: PipeWriter,
+        mut endpoints: MutexGuard<'_, HashMap<String, Endpoint>>,
+    ) -> Result<(), Box<dyn Error>> {
+        // Verify that no other connection is using this ID
+        let search = endpoints
+            .iter()
+            .find_map(|(key, val)| if *val.id == *req.id { Some(key) } else { None });
+
+        // Kill the connection if this ID is being used by another pending sender
+        if search.is_some() {
+            return Ok(());
+        }
+
+        // resize the pipe that we will be using for the actual
+        // file transfer
+        unsafe {
+            let res = libc::fcntl(reader.as_raw_fd(), libc::F_SETPIPE_SZ, MAX_SPLICE_SIZE);
+            if res < 0 {
+                return Ok(());
+            }
+        }
+
+        let endpoint = Endpoint {
+            id: req.id.clone(),
+            dir: Direction::Sender,
+            stream: self.connection,
+            peer_writer: Some(writer),
+            peer_reader: Some(reader),
+            has_peer: false,
+            time_added: SystemTime::now(),
+        };
+
+        log::debug!("[{:.6}] Added Sender", req.id);
+
+        endpoints.entry(req.id).or_insert(endpoint);
+        Ok(())
+    }
+
+    /// Establishement requires receiving a ConnectMessage from the new endpoint.
+    ///
+    /// Then either entering a pending state if the endpoint is a new sender, or
+    /// attempting to match endpoints if the new endpoint is a receiver.
+    pub fn establish(mut self) -> Result<(), Box<dyn Error>> {
+        let mut received_data = Vec::with_capacity(1024);
+        while received_data.is_empty() {
+            match networking::recv_generic(&mut self.connection, &mut received_data) {
+                Ok(v) if v < 0 => {
+                    break; // done recieving
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    break;
+                }
+            }
+        }
+
+        log::trace!("[?] Received {:?} bytes", received_data.len());
+
+        // attempt to recieve a portal request
+        let req: ConnectMessage = match PortalMessage::parse(&received_data)? {
+            PortalMessage::Connect(r) => r,
+            x => {
+                log::debug!("Got incorrect PortalMessage: {:?}", x);
+                return Err(PortalError::BadMsg.into());
+            }
+        };
+
+        log::info!(
+            "[{:.6}] New Portal request: {:?}({:?})",
+            req.id,
+            req.direction,
+            self.addr
+        );
+
+        // This pipe will be used to send data from Receiver->Sender or Sender->Receiver
+        // depending on direction. Each endpoint will create a pipe for uni-directional communication.
+        let (reader, mut writer) = pipe()?;
+
+        // Write the sender data or receiver acknowledgement to the write side
+        writer.write_all(&received_data)?;
+
+        // Clear old entries before accepting, will keep
+        // connections < 15 min old
+        let mut ref_endpoints = PENDING_ENDPOINTS.lock()?;
+        ref_endpoints.retain(|_, v| {
+            v.has_peer
+                || (v.time_added.elapsed().unwrap().as_secs()
+                    < std::time::Duration::from_secs(60 * 15).as_secs())
+        });
+
+        // Side specific behavior
+        match req.direction {
+            Direction::Receiver => self.add_receiver(req, reader, writer, ref_endpoints)?,
+            Direction::Sender => self.add_sender(req, reader, writer, ref_endpoints)?,
+        }
+        Ok(())
+    }
 }

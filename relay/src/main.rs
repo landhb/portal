@@ -1,7 +1,7 @@
 extern crate portal_lib as portal;
 
 use env_logger::Env;
-use log;
+use lazy_static::lazy_static;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::channel::channel;
@@ -17,9 +17,6 @@ use std::time::SystemTime;
 use structopt::StructOpt;
 use threadpool::ThreadPool;
 
-#[macro_use]
-extern crate lazy_static;
-
 mod handlers;
 mod networking;
 mod errors;
@@ -28,21 +25,30 @@ extern crate env_logger;
 
 mod protocol;
 
-use protocol::register;
-
 // Some tokens to allow us to identify which event is for which socket.
 const SERVER: Token = Token(0);
 const CHANNEL: Token = Token(1);
 
-/* From the cloudfare blog:
- * There is no "good" splice buffer size. Anecdotical evidence
- * says that it should be no larger than 512KiB since this is
- * the max we can expect realistically to fit into cpu
- * cache. */
+/// Pipe Size for Splicing
+///
+/// From the cloudfare blog:
+/// There is no "good" splice buffer size. Anecdotical evidence
+/// says that it should be no larger than 512KiB since this is
+/// the max we can expect realistically to fit into cpu
+/// cache.
 const MAX_SPLICE_SIZE: usize = 512 * 1024;
 
 /// Map of pending endpoints to correlate, keyed by ID
 const PENDING_ENDPOINTS: Mutex<HashMap<String, Endpoint>> = Mutex::new(HashMap::new());
+
+#[derive(Debug, StructOpt)]
+#[structopt(name = "portal-relay", about = "A relay for Portal.")]
+struct Opt {
+    /// Activate daemon mode
+    /// short and long flags (-b, --background)
+    #[structopt(short, long)]
+    background: bool,
+}
 
 #[derive(Debug)]
 pub struct Endpoint {
@@ -55,22 +61,18 @@ pub struct Endpoint {
     time_added: SystemTime,
 }
 
+/// An established pair of endpoints.
+///
+/// When fully constructed the two endpoints have been matched
+/// and each has an active connection to the relay.
 #[derive(Debug)]
 pub struct EndpointPair {
+    /// The sender and active mio Token
     sender: Endpoint,
     sender_token: Token,
-
+    /// The receiver and it's active mio Token
     receiver: Endpoint,
     receiver_token: Token,
-}
-
-#[derive(Debug, StructOpt)]
-#[structopt(name = "portal-relay", about = "A relay for Portal.")]
-struct Opt {
-    /// Activate daemon mode
-    /// short and long flags (-b, --background)
-    #[structopt(short, long)]
-    background: bool,
 }
 
 fn daemonize() -> Result<(), daemonize::DaemonizeError> {
@@ -159,10 +161,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Process each event.
         for event in events.iter() {
             match event.token() {
-                /*
-                 * When receiving an incoming connection, use the threadpool to accept
-                 * Portal requests without blocking the main loop
-                 */
+                // New incoming connections:
+                //
+                // When receiving an incoming connection, use the threadpool to accept
+                // Portal requests without blocking the main loop
                 SERVER => loop {
                     // If this is an event for the server, it means a connection
                     // is ready to be accepted.
@@ -179,20 +181,22 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     log::debug!("[+] New connection from {:?}", addr);
 
-                    // TODO set RECV_TIMEO
-                    let tx_new = tx.clone();
-                    thread_pool.execute(move || match register(addr, connection, tx_new) {
+                    // Begin brokering the two endpoints
+                    let broker = protocol::ConnectionBroker::new(addr, connection, tx.clone());
+
+                    // Let the thread pool handle the pairing. TODO set RECV_TIMEO
+                    thread_pool.execute(move || match broker.establish() {
                         Ok(_) => {}
                         Err(_e) => {
                             log::error!("Error creating portal: {}", _e);
                         }
                     });
                 },
-                /*
-                 * When a worker thread has completed pairing two peers, the EndpointPair
-                 * will be sent over an MPSC channel to be added to the list of file descriptors
-                 * we're polling
-                 */
+                // New pair created:
+                //
+                // When a worker thread has completed pairing two peers, the EndpointPair
+                // will be sent over an MPSC channel to be added to the list of file descriptors
+                // we're polling
                 CHANNEL => {
                     while let Ok(mut pair) = rx.try_recv() {
                         pair.sender_token = next(&mut unique_token);
@@ -225,10 +229,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .or_insert_with(|| pair);
                     }
                 }
-                /*
-                 * Any other events indicate there is data we need to channel between two TCP connections
-                 * at this time we primarily use splice() to do that
-                 */
+                // I/O events for established pairs:
+                //
+                // Any other events indicate there is data we need to channel between two TCP
+                // connections at this time we primarily use splice() to do that.
                 token => {
                     let mut ref_endpoints = endpoints.borrow_mut();
                     let lookup = id_lookup.borrow();

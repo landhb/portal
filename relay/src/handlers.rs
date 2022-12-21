@@ -1,7 +1,6 @@
 extern crate portal_lib as portal;
-
 use crate::Endpoint;
-use crate::{log, MAX_SPLICE_SIZE};
+use crate::MAX_SPLICE_SIZE;
 use std::error::Error;
 use std::os::unix::io::AsRawFd;
 
