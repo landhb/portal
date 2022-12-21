@@ -25,7 +25,7 @@ fn test_nonce() {
     let mut n = NonceSequence::new();
     let mut old = [0u8; 12];
     for _ in 0..5_000_000 {
-        let new = n.next().unwrap();
+        let new = n.next_unique().unwrap();
         // test that every nonce is greater than the last
         // which means it is larger & different than all previous
         assert!(new > old);
