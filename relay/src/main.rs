@@ -22,6 +22,7 @@ extern crate lazy_static;
 
 mod handlers;
 mod networking;
+mod errors;
 
 extern crate env_logger;
 
@@ -40,9 +41,8 @@ const CHANNEL: Token = Token(1);
  * cache. */
 const MAX_SPLICE_SIZE: usize = 512 * 1024;
 
-lazy_static! {
-    static ref PENDING_ENDPOINTS: Mutex<HashMap<String, Endpoint>> = Mutex::new(HashMap::new());
-}
+/// Map of pending endpoints to correlate, keyed by ID
+const PENDING_ENDPOINTS: Mutex<HashMap<String, Endpoint>> = Mutex::new(HashMap::new());
 
 #[derive(Debug)]
 pub struct Endpoint {
