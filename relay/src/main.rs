@@ -11,7 +11,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::OpenOptions;
-use std::ops::ControlFlow;
 use std::rc::Rc;
 use std::sync::Mutex;
 use std::time::SystemTime;
@@ -20,7 +19,9 @@ use threadpool::ThreadPool;
 
 mod errors;
 mod ffi;
-mod handlers;
+mod tunnel;
+use tunnel::Tunnel;
+
 mod networking;
 
 extern crate env_logger;
@@ -274,21 +275,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     log::debug!("[{:.6}] {:?} Event: {:?}", id, side, event);
 
-                    let mut tunnel = handlers::Tunnel::new(endpoint, peer)?;
+                    let mut tunnel = Tunnel::new(endpoint, peer)?;
 
-                    let mut done = ControlFlow::Continue(());
+                    let mut done = false;
 
                     // if we received data on this endpoint, splice it to the peer
                     if event.readiness().is_readable() {
-                        //done = handlers::tcp_splice(endpoint, peer)?;
                         done = tunnel.transfer_until_blocked()?;
                     }
 
                     // if we got a writable event, then there is pending data in the intermediary pipe
                     if event.readiness().is_writable() {
-                        //while done != done = tunnel.drain_to_destination()?;
-                        //done = tunnel.transfer_until_blocked()?;
-                        while let Ok(ControlFlow::Continue(())) = tunnel.drain_to_destination() {}
+                        done = tunnel.transfer_until_blocked()?;
 
                         // Turn off writable notifications for the Sender if on, this is only used
                         // to kick off the initial message exchange by draining the initial pipe
@@ -306,7 +304,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     // If this connection is finished, or our peer has disconnected
                     // shutdown the connection
-                    if done == ControlFlow::Break(()) {
+                    if done {
                         // There may still be some data in the Receiver's pipe, drain it
                         // before closing the peer connection. We must register for writeable
                         // events in case the Receiver's socket is still blocking
