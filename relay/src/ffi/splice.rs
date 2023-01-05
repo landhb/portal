@@ -21,5 +21,5 @@ pub fn splice(infd: RawFd, outfd: RawFd) -> Result<usize, RelayError> {
     }
 
     // Return the amount spliced
-    Ok(res.try_into().or(Err(RelayError::TypeError))?)
+    res.try_into().or(Err(RelayError::TypeError))
 }

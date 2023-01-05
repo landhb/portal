@@ -63,24 +63,17 @@ impl<'a> Tunnel<'a> {
     fn buffer_source(&mut self) -> Result<usize, RelayError> {
         // Read into the pipe
         let rx = splice(self.source, self.pipe_in);
-
-        // Check for fatal errors
-        if rx.is_err() && !matches!(rx, Err(RelayError::WouldBlock)) {
-            return rx;
+        match rx {
+            // Done reading
+            Ok(x) if x == 0 => {
+                self.source_finished = true;
+                Ok(0)
+            }
+            // Would block
+            Err(RelayError::WouldBlock) => Ok(0),
+            // All other errors or Ok() results propogate
+            _ => rx,
         }
-
-        // Check if the source is finished
-        if matches!(rx, Ok(x) if x == 0) {
-            self.source_finished = true;
-        }
-
-        // Convert wouldblock errors to Ok errors
-        if matches!(rx, Err(RelayError::WouldBlock)) {
-            return Ok(0);
-        }
-
-        // Pass the ok result
-        rx
     }
 
     /// Drain data from the pipe into the destination.
@@ -90,18 +83,16 @@ impl<'a> Tunnel<'a> {
     pub fn drain_to_destination(&mut self) -> Result<ControlFlow<()>, RelayError> {
         // Write from the pipe into the peer connection
         let tx = splice(self.pipe_out, self.destination);
-
-        // Check for fatal errors
-        if tx.is_err() && !matches!(tx, Err(RelayError::WouldBlock)) {
-            return tx.map(|_| ControlFlow::Break(()));
+        match tx {
+            // Closed pipe
+            Ok(x) if x == 0 => Ok(ControlFlow::Break(())),
+            // Would block
+            Err(RelayError::WouldBlock) => Ok(ControlFlow::Break(())),
+            // Fatal errors
+            Err(_e) => tx.map(|_| ControlFlow::Break(())),
+            // Continue writing
+            _ => Ok(ControlFlow::Continue(())),
         }
-
-        // Non-fatal errors or a closed pipe map to Ok(Break)
-        if matches!(tx, Err(RelayError::WouldBlock)) || matches!(tx, Ok(x) if x == 0) {
-            return Ok(ControlFlow::Break(()));
-        }
-
-        Ok(ControlFlow::Continue(()))
     }
 
     /// Helper method to transfer as much data as possible, until either the source
@@ -111,12 +102,20 @@ impl<'a> Tunnel<'a> {
     /// method will continue draining the internal buffer until there is no more data
     /// available to send.
     pub fn transfer_until_blocked(&mut self) -> Result<ControlFlow<()>, Box<dyn Error>> {
-        while let ControlFlow::Continue(()) = self.drain_to_destination()? {
+        loop {
+            // Only read when data is available
             if !self.source_finished {
                 self.buffer_source()?;
             }
-            println!("Buffering");
+
+            // Continue draining pipe
+            match self.drain_to_destination() {
+                Ok(ControlFlow::Break(())) => break,
+                Ok(ControlFlow::Continue(())) => continue,
+                Err(e) => return Err(e.into()),
+            }
         }
+        // Continue polling until next event
         Ok(ControlFlow::Continue(()))
     }
 }

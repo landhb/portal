@@ -35,7 +35,7 @@ impl RelayError {
     pub fn from_errno() -> RelayError {
         match unsafe { *libc::__errno_location() } {
             // Known error conversion
-            libc::EWOULDBLOCK | libc::EAGAIN => RelayError::WouldBlock,
+            libc::EWOULDBLOCK => RelayError::WouldBlock,
 
             // Unknown, provide error code for debugging
             x => RelayError::Unknown(x),

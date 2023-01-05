@@ -11,12 +11,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::OpenOptions;
+use std::ops::ControlFlow;
 use std::rc::Rc;
 use std::sync::Mutex;
 use std::time::SystemTime;
 use structopt::StructOpt;
 use threadpool::ThreadPool;
-use std::ops::ControlFlow;
 
 mod errors;
 mod ffi;
@@ -287,7 +287,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // if we got a writable event, then there is pending data in the intermediary pipe
                     if event.readiness().is_writable() {
                         //while done != done = tunnel.drain_to_destination()?;
-                        done = tunnel.transfer_until_blocked()?;
+                        //done = tunnel.transfer_until_blocked()?;
+                        while let Ok(ControlFlow::Continue(())) = tunnel.drain_to_destination() {}
 
                         // Turn off writable notifications for the Sender if on, this is only used
                         // to kick off the initial message exchange by draining the initial pipe
