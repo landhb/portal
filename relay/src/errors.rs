@@ -10,7 +10,13 @@ use std::error::Error;
 pub enum RelayError {
     /// Operation Would Block
     WouldBlock,
-    
+
+    /// No file descriptor
+    MissingFileDescriptor,
+
+    /// FFI Type Error
+    TypeError,
+
     /// Unknown - catch all, return this instead of panicing
     Unknown(i32),
 }

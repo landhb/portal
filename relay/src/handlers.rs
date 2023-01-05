@@ -1,8 +1,125 @@
 extern crate portal_lib as portal;
+use crate::errors::RelayError;
+use crate::ffi::splice;
 use crate::Endpoint;
 use crate::MAX_SPLICE_SIZE;
 use std::error::Error;
+use std::ops::ControlFlow;
 use std::os::unix::io::AsRawFd;
+use std::os::unix::io::RawFd;
+
+/// Abstraction around a TCP splice using an intermediary kernel pipe.
+///
+/// Data will be buffered on the pipe from the source and written to the
+/// destination when able.
+///
+/// The tunnel holds references to the underlying endpoints to ensure the
+/// tunnel may only live as long as the provided references on initialization.
+#[allow(dead_code)]
+pub struct Tunnel<'a> {
+    /// Source file descriptor
+    source: RawFd,
+    /// Input end of the intermediary pipe
+    pipe_in: RawFd,
+    /// Output end of the intermediary pipe
+    pipe_out: RawFd,
+    /// Destination file descriptor
+    destination: RawFd,
+    /// Boolean to track when the source is finished.
+    source_finished: bool,
+    /// Reference to Source Endpoint
+    sref: &'a Endpoint,
+    /// Reference to Destination Endpoint
+    dref: &'a Endpoint,
+}
+
+impl<'a> Tunnel<'a> {
+    /// Initialize a tunnel from two endpoints.
+    pub fn new(source: &'a Endpoint, destination: &'a Endpoint) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            source: source.stream.as_raw_fd(),
+            pipe_in: source
+                .peer_writer
+                .as_ref()
+                .ok_or(RelayError::MissingFileDescriptor)?
+                .as_raw_fd(),
+            pipe_out: destination
+                .peer_reader
+                .as_ref()
+                .ok_or(RelayError::MissingFileDescriptor)?
+                .as_raw_fd(),
+            destination: destination.stream.as_raw_fd(),
+            source_finished: false,
+            sref: source,
+            dref: destination,
+        })
+    }
+
+    /// Buffer data from the source into the pipe.
+    ///
+    /// Only errors on fatal errors. Wouldblock results in an Ok() condition
+    /// since it is possible for the pipe to be full while we are still able
+    /// to drain data from the pipe into the destination.
+    fn buffer_source(&mut self) -> Result<usize, RelayError> {
+        // Read into the pipe
+        let rx = splice(self.source, self.pipe_in);
+
+        // Check for fatal errors
+        if rx.is_err() && !matches!(rx, Err(RelayError::WouldBlock)) {
+            return rx;
+        }
+
+        // Check if the source is finished
+        if matches!(rx, Ok(x) if x == 0) {
+            self.source_finished = true;
+        }
+
+        // Convert wouldblock errors to Ok errors
+        if matches!(rx, Err(RelayError::WouldBlock)) {
+            return Ok(0);
+        }
+
+        // Pass the ok result
+        rx
+    }
+
+    /// Drain data from the pipe into the destination.
+    ///
+    /// Publicly available so that it may be called standalone when the endpoint
+    /// is writable but not readable.
+    pub fn drain_to_destination(&mut self) -> Result<ControlFlow<()>, RelayError> {
+        // Write from the pipe into the peer connection
+        let tx = splice(self.pipe_out, self.destination);
+
+        // Check for fatal errors
+        if tx.is_err() && !matches!(tx, Err(RelayError::WouldBlock)) {
+            return tx.map(|_| ControlFlow::Break(()));
+        }
+
+        // Non-fatal errors or a closed pipe map to Ok(Break)
+        if matches!(tx, Err(RelayError::WouldBlock)) || matches!(tx, Ok(x) if x == 0) {
+            return Ok(ControlFlow::Break(()));
+        }
+
+        Ok(ControlFlow::Continue(()))
+    }
+
+    /// Helper method to transfer as much data as possible, until either the source
+    /// or destination is in a blocking state.
+    ///
+    /// When the source is blocking, but there is data still available in the pipe. This
+    /// method will continue draining the internal buffer until there is no more data
+    /// available to send.
+    pub fn transfer_until_blocked(&mut self) -> Result<ControlFlow<()>, Box<dyn Error>> {
+        while let ControlFlow::Continue(()) = self.drain_to_destination()? {
+            if !self.source_finished {
+                self.buffer_source()?;
+            }
+            println!("Buffering");
+        }
+        Ok(ControlFlow::Continue(()))
+    }
+}
 
 /**
  *  Handles TCP splicing without utilizing a userpace intermediary buffer

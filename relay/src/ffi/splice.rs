@@ -1,4 +1,5 @@
 use crate::errors::RelayError;
+use std::convert::TryInto;
 use std::os::unix::io::RawFd;
 
 pub fn splice(infd: RawFd, outfd: RawFd) -> Result<usize, RelayError> {
@@ -16,9 +17,9 @@ pub fn splice(infd: RawFd, outfd: RawFd) -> Result<usize, RelayError> {
 
     // Return the underlying error
     if res < 0 {
-        return Err(KeyError::from_errno());
+        return Err(RelayError::from_errno());
     }
 
     // Return the amount spliced
-    Ok(res)
+    Ok(res.try_into().or(Err(RelayError::TypeError))?)
 }

@@ -16,10 +16,12 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 use structopt::StructOpt;
 use threadpool::ThreadPool;
+use std::ops::ControlFlow;
 
+mod errors;
+mod ffi;
 mod handlers;
 mod networking;
-mod errors;
 
 extern crate env_logger;
 
@@ -38,8 +40,10 @@ const CHANNEL: Token = Token(1);
 /// cache.
 const MAX_SPLICE_SIZE: usize = 512 * 1024;
 
-/// Map of pending endpoints to correlate, keyed by ID
-const PENDING_ENDPOINTS: Mutex<HashMap<String, Endpoint>> = Mutex::new(HashMap::new());
+lazy_static! {
+    /// Map of pending endpoints to correlate, keyed by ID
+    static ref PENDING_ENDPOINTS: Mutex<HashMap<String, Endpoint>> = Mutex::new(HashMap::new());
+}
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "portal-relay", about = "A relay for Portal.")]
@@ -270,16 +274,20 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     log::debug!("[{:.6}] {:?} Event: {:?}", id, side, event);
 
-                    let mut done = false;
+                    let mut tunnel = handlers::Tunnel::new(endpoint, peer)?;
+
+                    let mut done = ControlFlow::Continue(());
 
                     // if we received data on this endpoint, splice it to the peer
                     if event.readiness().is_readable() {
-                        done = handlers::tcp_splice(endpoint, peer)?;
+                        //done = handlers::tcp_splice(endpoint, peer)?;
+                        done = tunnel.transfer_until_blocked()?;
                     }
 
                     // if we got a writable event, then there is pending data in the intermediary pipe
                     if event.readiness().is_writable() {
-                        done = handlers::drain_pipe(endpoint)?;
+                        //while done != done = tunnel.drain_to_destination()?;
+                        done = tunnel.transfer_until_blocked()?;
 
                         // Turn off writable notifications for the Sender if on, this is only used
                         // to kick off the initial message exchange by draining the initial pipe
@@ -297,7 +305,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     // If this connection is finished, or our peer has disconnected
                     // shutdown the connection
-                    if done {
+                    if done == ControlFlow::Break(()) {
                         // There may still be some data in the Receiver's pipe, drain it
                         // before closing the peer connection. We must register for writeable
                         // events in case the Receiver's socket is still blocking
