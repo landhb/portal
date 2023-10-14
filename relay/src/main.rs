@@ -73,19 +73,17 @@ struct Opt {
     background: bool,
 }
 
-fn daemonize() -> Result<(), daemonize::DaemonizeError> {
+fn daemonize() -> Result<(), Box<dyn Error>> {
     use daemonize::Daemonize;
 
     let stdout = OpenOptions::new()
         .append(true)
         .create(true)
-        .open("/tmp/relay.out")
-        .unwrap();
+        .open("/tmp/relay.out")?;
     let stderr = OpenOptions::new()
         .append(true)
         .create(true)
-        .open("/tmp/relay.err")
-        .unwrap();
+        .open("/tmp/relay.err")?;
 
     let daemonize = Daemonize::new()
         .pid_file("/tmp/relay.pid")
@@ -95,7 +93,7 @@ fn daemonize() -> Result<(), daemonize::DaemonizeError> {
         .stdout(stdout) // Redirect stdout to `/tmp/relay.out`.
         .stderr(stderr); // Redirect stderr to `/tmp/relay.err`.
 
-    daemonize.start()
+    Ok(daemonize.start()?)
 }
 
 // increment the polling token by one
