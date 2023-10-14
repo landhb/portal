@@ -1,6 +1,5 @@
 extern crate portal_lib as portal;
 
-use anyhow::Result;
 use colored::*;
 use dns_lookup::lookup_host;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};

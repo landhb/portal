@@ -55,7 +55,7 @@ pub const NO_PROGRESS_CALLBACK: Option<fn(usize)> = None::<fn(usize)>;
 /**
  * The primary interface into the library.
  */
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct Portal {
     // Information to correlate
     // connections on the relay
@@ -100,11 +100,11 @@ impl Portal {
         let mut hasher = Sha256::new();
         hasher.update(&id);
         let id_bytes = hasher.finalize();
-        let id_hash = hex::encode(&id_bytes);
+        let id_hash = hex::encode(id_bytes);
 
         // Initialize the state
         let (s1, outbound_msg) = Spake2::<Ed25519Group>::start_symmetric(
-            &Password::new(&password.as_bytes()),
+            &Password::new(password.as_bytes()),
             &Identity::new(&id_bytes),
         );
 
@@ -336,7 +336,7 @@ impl Portal {
             .ok_or(BadFileName)?;
 
         // Map the file into memory
-        let mut mmap = self.map_readable_file(&path)?;
+        let mut mmap = self.map_readable_file(path)?;
 
         // Create the metatada object
         let metadata = Metadata {
@@ -358,9 +358,9 @@ impl Portal {
 
             // Increment and optionally invoke callback
             total_sent += chunk.len();
-            callback.as_ref().map(|c| {
+            if let Some(c) = callback.as_ref() {
                 c(total_sent);
-            });
+            }
         }
         Ok(total_sent)
     }
@@ -430,13 +430,13 @@ impl Portal {
         let mut total = 0;
         for chunk in mmap[..].chunks_mut(CHUNK_SIZE) {
             // Receive the entire chunk in-place
-            Protocol::read_encrypted_zero_copy(peer, &key, chunk)?;
+            Protocol::read_encrypted_zero_copy(peer, key, chunk)?;
 
             // Increment and optionally invoke callback
             total += chunk.len();
-            display.as_ref().map(|c| {
+            if let Some(c) = display.as_ref() {
                 c(total);
-            });
+            }
         }
 
         // Check for incomplete transfers
@@ -447,19 +447,19 @@ impl Portal {
     }
 
     /// Helper: mmap's a file into memory for reading
-    fn map_readable_file<'a>(&'a self, f: &PathBuf) -> Result<MmapMut, Box<dyn Error>> {
+    fn map_readable_file(&self, f: &PathBuf) -> Result<MmapMut, Box<dyn Error>> {
         let file = File::open(f)?;
         let mmap = unsafe { MmapOptions::new().map_copy(&file)? };
         Ok(mmap)
     }
 
     /// Helper: mmap's a file into memory for writing
-    fn map_writeable_file<'a>(&'a self, f: &PathBuf, size: u64) -> Result<MmapMut, Box<dyn Error>> {
+    fn map_writeable_file(&self, f: &PathBuf, size: u64) -> Result<MmapMut, Box<dyn Error>> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .open(&f)?;
+            .open(f)?;
 
         file.set_len(size)?;
         let mmap = unsafe { MmapOptions::new().map_mut(&file)? };
@@ -469,7 +469,7 @@ impl Portal {
     /// Returns a copy of the Portal::Direction associated with
     /// this Portal request
     pub fn get_direction(&self) -> Direction {
-        self.direction.clone()
+        self.direction
     }
 
     /// Sets the Portal::Direction associated with this Poral request

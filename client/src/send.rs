@@ -28,7 +28,7 @@ fn add_all(info: &mut TransferInfo, dir: PathBuf) -> Result<(), Box<dyn Error>> 
 
     // Collect all entries
     let entries = std::fs::read_dir(dir)?
-        .filter_map(|res| res.as_ref().map_or(None, |e| check_file(e)))
+        .filter_map(|res| res.as_ref().map_or(None, check_file))
         .collect::<Vec<PathBuf>>();
 
     // Add them individually
@@ -110,7 +110,7 @@ pub fn send_all(client: &mut TcpStream, files: Vec<PathBuf>) -> Result<(), Box<d
         };
 
         // Begin the transfer
-        let _sent = portal.send_file(client, &fullpath, Some(progress)).ok();
+        let _sent = portal.send_file(client, fullpath, Some(progress))?;
 
         pb.finish();
     }

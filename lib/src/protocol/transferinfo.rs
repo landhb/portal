@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 /// Metadata about the transfer to be exchanged
 /// between peers after key derivation (encrypted)
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Default)]
 pub struct Metadata {
     //pub id: u32,
     pub filesize: u64,
@@ -14,7 +14,7 @@ pub struct Metadata {
 
 /// Contains the metadata for all files that will be sent
 /// during a particular transfer
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Default)]
 pub struct TransferInfo {
     /// The metadata to send to the peer. These
     /// filenames are striped of their path information
@@ -69,6 +69,12 @@ impl TransferInfo {
     }
 }
 
+impl Default for TransferInfoBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TransferInfoBuilder {
     /// Builder pattern for TransferInfo
     ///
@@ -88,9 +94,7 @@ impl TransferInfoBuilder {
     /// }
     /// ```
     pub fn new() -> TransferInfoBuilder {
-        Self {
-            0: TransferInfo::empty(),
-        }
+        Self(TransferInfo::empty())
     }
 
     pub fn add_file(mut self, path: &Path) -> Result<TransferInfoBuilder, Box<dyn Error>> {

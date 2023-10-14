@@ -1,7 +1,6 @@
 extern crate portal_lib as portal;
 
 use env_logger::Env;
-use log;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::channel::channel;
@@ -73,19 +72,17 @@ struct Opt {
     background: bool,
 }
 
-fn daemonize() -> Result<(), daemonize::DaemonizeError> {
+fn daemonize() -> Result<(), Box<dyn Error>> {
     use daemonize::Daemonize;
 
     let stdout = OpenOptions::new()
         .append(true)
         .create(true)
-        .open("/tmp/relay.out")
-        .unwrap();
+        .open("/tmp/relay.out")?;
     let stderr = OpenOptions::new()
         .append(true)
         .create(true)
-        .open("/tmp/relay.err")
-        .unwrap();
+        .open("/tmp/relay.err")?;
 
     let daemonize = Daemonize::new()
         .pid_file("/tmp/relay.pid")
@@ -95,7 +92,7 @@ fn daemonize() -> Result<(), daemonize::DaemonizeError> {
         .stdout(stdout) // Redirect stdout to `/tmp/relay.out`.
         .stderr(stderr); // Redirect stderr to `/tmp/relay.err`.
 
-    daemonize.start()
+    Ok(daemonize.start()?)
 }
 
 // increment the polling token by one
@@ -320,11 +317,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // Shutdown this endpoint
                         poll.deregister(&endpoint.stream)?;
                         let id = id_lookup.borrow_mut().remove(&token);
-                        if endpoint.stream.shutdown(std::net::Shutdown::Both).is_ok() {} // ignore shutdown errors
+                        _ = endpoint.stream.shutdown(std::net::Shutdown::Both); // ignore shutdown errors
 
                         // close the write end of the pipe, otherwise splice() will continually
                         // return EWOULDBLOCK intead of knowing when there is no data left
-                        let old_writer = std::mem::replace(&mut endpoint.peer_writer, None);
+                        let old_writer = endpoint.peer_writer.take();
                         drop(old_writer);
 
                         // indicate to the peer that this endpoint is gone

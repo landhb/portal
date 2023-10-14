@@ -20,11 +20,11 @@ const TAG_SIZE: usize = 16;
 /// An abstraction around a nonce sequence. Safely
 /// ensures there is no nonce re-use during a session
 /// with a single key.
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct NonceSequence([u8; TAG_SIZE]);
 
 /// All encrypted messages must have associated state data (nonce, tag)
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Default)]
 pub struct EncryptedMessage {
     /// Provides storage for chacha20poly1305::Nonce
     pub nonce: [u8; NONCE_SIZE],
@@ -45,14 +45,16 @@ impl EncryptedMessage {
         data: &mut [u8],
     ) -> Result<Self, Box<dyn Error>> {
         // Init state to send
-        let mut state = Self::default();
+        let mut state = Self {
+            nonce: nseq.next_unique()?,
+            ..Default::default()
+        };
 
         // Obtain the next nonce
-        state.nonce = nseq.next()?;
         let nonce = Nonce::from_slice(&state.nonce);
 
         // Obtain the cipher from the key
-        let cha_key = Key::from_slice(&key[..]);
+        let cha_key = Key::from_slice(key);
         let cipher = ChaCha20Poly1305::new(cha_key);
 
         // Set the length
@@ -71,7 +73,7 @@ impl EncryptedMessage {
     /// Decrypt the provided data in-place
     pub fn decrypt(&mut self, key: &[u8], data: &mut [u8]) -> Result<usize, Box<dyn Error>> {
         // Obtain the cipher from the key
-        let cha_key = Key::from_slice(&key[..]);
+        let cha_key = Key::from_slice(key);
         let cipher = ChaCha20Poly1305::new(cha_key);
 
         // The nonce & tag are self contained
@@ -80,7 +82,7 @@ impl EncryptedMessage {
 
         // Decrypt the data in place
         cipher
-            .decrypt_in_place_detached(&nonce, b"", data, &tag)
+            .decrypt_in_place_detached(nonce, b"", data, tag)
             .or(Err(DecryptError))?;
 
         Ok(data.len())
@@ -139,18 +141,22 @@ impl EncryptedMessage {
     }
 }
 
+impl Default for NonceSequence {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NonceSequence {
     /// Initialize the sequence by generating a random 128bit nonce
     pub fn new() -> Self {
         let mut rng = rand::thread_rng();
-        Self {
-            0: rng.gen::<[u8; 16]>(),
-        }
+        Self(rng.gen::<[u8; 16]>())
     }
 
     /// Advance the sequence by incrementing the internal state
     /// and returning the current state. Similar nonces in TLS 1.3
-    pub fn next(&mut self) -> Result<[u8; NONCE_SIZE], Box<dyn Error>> {
+    pub fn next_unique(&mut self) -> Result<[u8; NONCE_SIZE], Box<dyn Error>> {
         // Save the old value
         let old = self.0;
 
@@ -159,6 +165,6 @@ impl NonceSequence {
         self.0 = new.wrapping_add(1).wrapping_shl(32).to_be_bytes();
 
         // Return the old value as a nonce
-        old[..NONCE_SIZE].try_into().or(Err(CryptoError.into()))
+        Ok(old[..NONCE_SIZE].try_into().or(Err(CryptoError))?)
     }
 }

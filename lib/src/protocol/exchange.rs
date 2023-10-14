@@ -7,12 +7,12 @@ use serde::{Deserialize, Serialize};
 
 /// A data format exchanged by each peer to derive
 /// the shared session key
-#[derive(PartialEq, Debug, Copy, Clone)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub struct PortalKeyExchange([u8; 33]);
 
 /// A data format exchanged by each peer to confirm
 /// that they have each derived the same key
-#[derive(PartialEq, Debug, Copy, Clone)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub struct PortalConfirmation(pub [u8; 42]);
 
 /// Provide a serde visitor to serialize/deserialize larger arrays
@@ -35,8 +35,8 @@ where
         A: SeqAccess<'de>,
     {
         let mut arr = [T::default(); N];
-        for i in 0..N {
-            arr[i] = seq
+        for (i, item) in arr.iter_mut().enumerate().take(N) {
+            *item = seq
                 .next_element()?
                 .ok_or_else(|| Error::invalid_length(i, &self))?;
         }
@@ -55,7 +55,7 @@ impl<'de> Deserialize<'de> for PortalKeyExchange {
         let res =
             deserializer.deserialize_tuple(std::mem::size_of::<PortalKeyExchange>(), visitor)?;
 
-        Ok(Self { 0: res })
+        Ok(Self(res))
     }
 }
 
@@ -72,6 +72,7 @@ impl Serialize for PortalKeyExchange {
     }
 }
 
+#[allow(clippy::from_over_into)]
 impl<'a> Into<&'a [u8]> for &'a PortalKeyExchange {
     fn into(self) -> &'a [u8] {
         &self.0
@@ -81,10 +82,10 @@ impl<'a> Into<&'a [u8]> for &'a PortalKeyExchange {
 impl TryFrom<Vec<u8>> for PortalKeyExchange {
     type Error = &'static str;
     fn try_from(v: Vec<u8>) -> Result<Self, Self::Error> {
-        Ok(Self {
-            0: v.try_into()
+        Ok(Self(
+            v.try_into()
                 .or(Err("Cannot convert into PortalKeyExchange"))?,
-        })
+        ))
     }
 }
 
@@ -99,7 +100,7 @@ impl<'de> Deserialize<'de> for PortalConfirmation {
         let res =
             deserializer.deserialize_tuple(std::mem::size_of::<PortalConfirmation>(), visitor)?;
 
-        Ok(Self { 0: res })
+        Ok(Self(res))
     }
 }
 
