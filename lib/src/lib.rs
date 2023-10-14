@@ -100,11 +100,11 @@ impl Portal {
         let mut hasher = Sha256::new();
         hasher.update(&id);
         let id_bytes = hasher.finalize();
-        let id_hash = hex::encode(&id_bytes);
+        let id_hash = hex::encode(id_bytes);
 
         // Initialize the state
         let (s1, outbound_msg) = Spake2::<Ed25519Group>::start_symmetric(
-            &Password::new(&password.as_bytes()),
+            &Password::new(password.as_bytes()),
             &Identity::new(&id_bytes),
         );
 
@@ -459,7 +459,7 @@ impl Portal {
             .read(true)
             .write(true)
             .create(true)
-            .open(&f)?;
+            .open(f)?;
 
         file.set_len(size)?;
         let mmap = unsafe { MmapOptions::new().map_mut(&file)? };
